@@ -178,10 +178,13 @@ pub(super) fn show_task_dialog(
     drop(unsafe { Arc::from_raw(config.lp_callback_data as *const WorkerShared) });
 
     if hr != S_OK {
-        if shared.dialog_hwnd.load(Ordering::Acquire) == 0 {
-            // Failed before TDN_CREATED: the entry handshake never fired —
-            // report it as a pre-Accept failure so the command answers with
-            // the synchronous typed error path.
+        if !shared.entered.load(Ordering::Acquire) {
+            // Failed before TDN_CREATED (the entered state never fired):
+            // the entry handshake never sent Accepted — report it as a
+            // pre-Accept failure so the command answers with the
+            // synchronous typed error path. run_worker's transaction sees
+            // the same `entered` flag and NEVER submits a terminal for
+            // this outcome (the pre-Accept law).
             let _ = shared.send_entry(super::worker::EntryOutcome::Failed {
                 error: typed_error(
                     error_code::PRESENTATION_FAILED,
@@ -189,7 +192,8 @@ pub(super) fn show_task_dialog(
                 ),
             });
         }
-        // After TDN_CREATED the failure is post-Accepted: a terminal error.
+        // After TDN_CREATED (entered) the failure is post-Accepted: a
+        // terminal error.
         return Err(typed_error(
             error_code::PRESENTATION_FAILED,
             format!("TaskDialogIndirect failed: {hr:#010x}"),
@@ -231,9 +235,9 @@ unsafe extern "system" fn task_dialog_callback(
         shared.dialog_hwnd.store(hwnd as isize, Ordering::Release);
         *shared.target.lock().unwrap_or_else(|error| error.into_inner()) =
             DialogTarget::TaskDialog { hwnd };
-        let _ = shared.send_entry(super::worker::EntryOutcome::Entered {
-            evidence: "TDN_CREATED",
-        });
+        // Fires the Accepted handshake AND records the entered state (the
+        // pre/post-entry authority run_worker's terminal gate reads).
+        let _ = shared.send_entry_entered("TDN_CREATED");
     }
     S_OK
 }
@@ -275,11 +279,8 @@ pub(super) fn show_message_box(
 
     *shared.target.lock().unwrap_or_else(|error| error.into_inner()) = DialogTarget::MessageBox;
     // Entry evidence for MessageBoxW is entering the call itself (no
-    // creation callback exists).
-    let handshake_alive =
-        shared.send_entry(super::worker::EntryOutcome::Entered {
-            evidence: "MessageBox-entry",
-        });
+    // creation callback exists); the call records the entered state.
+    let handshake_alive = shared.send_entry_entered("MessageBox-entry");
     // SAFETY: the wide buffers live across the call; null caption maps to
     // the platform default title bar.
     let result = unsafe {

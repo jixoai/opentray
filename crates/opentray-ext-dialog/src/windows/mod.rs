@@ -11,12 +11,18 @@
 //! - **Accepted = the worker entered its native modal call.** TaskDialog
 //!   proves it with the `TDN_CREATED` callback; `IFileDialog::Show` and
 //!   the MessageBox fallback prove it by entering the call (no prior
-//!   presentation signal exists — never claimed).
+//!   presentation signal exists — never claimed). The `entered` flag on
+//!   `WorkerShared` records that state and is the single pre/post-entry
+//!   authority.
 //! - **3s pre-Accept budget** for worker spawn + STA init + dialog
-//!   construction + entry. A timeout answers the ORIGINAL requestId with
+//!   construction + entry. EVERY pre-entry failure (budget timeout, spawn
+//!   failure, COM init, dispatcher window, dialog construction, a
+//!   pre-`TDN_CREATED` modal failure) answers the ORIGINAL requestId with
 //!   a synchronous typed `dialog_presentation_failed` error: no Accepted
-//!   frame, no operation, no terminal (the host retires the operation on
-//!   the error path). Failures after entry are terminal error payloads.
+//!   frame, no operation, and never a terminal — the worker-side terminal
+//!   path branches on `entered` through
+//!   [`state::worker_completion_transaction`]. Failures after entry are
+//!   terminal error payloads.
 //! - **Close dispatcher** = `WM_APP + ordinal` posted to the worker's
 //!   message-only window; every COM/native object is only ever touched on
 //!   the worker thread (inside the modal pump).
@@ -376,21 +382,40 @@ fn run_worker(request: WorkerRequest) {
         }
     };
 
+    // The pre/post-entry transaction (design section 5.3): the tracked
+    // `entered` state — never the outcome's Ok/Err — decides whether a
+    // terminal may exist. A worker that never entered its native modal
+    // answers the command with the synchronous typed error through the
+    // entry handshake and submits NOTHING through the deferred port.
+    let completion = state::worker_completion_transaction(
+        shared.entered.load(Ordering::Acquire),
+        shared.abandoned.load(Ordering::Acquire),
+        shared.revoked.load(Ordering::Acquire),
+        outcome,
+        &kind,
+    );
+    if let state::WorkerCompletion::PreEntry {
+        error: Some(error),
+    } = &completion
+    {
+        // Deliver before teardown so the owner's bounded wait unblocks with
+        // the specific error. First delivery wins: task_dialog's
+        // pre-TDN_CREATED branch may already have sent its own.
+        let _ = shared.send_entry(EntryOutcome::Failed {
+            error: error.clone(),
+        });
+    }
+
     // SAFETY: the dispatcher was created by this thread; after the modal
     // returned its pump is gone, so no close message can be in flight.
     unsafe { worker::destroy_dispatcher_window(&shared) };
     drop(sta);
     shared.take_entry();
 
-    if !shared.abandoned.load(Ordering::Acquire) {
-        let payload = if shared.revoked.load(Ordering::Acquire) {
-            // The cancel branch (isomorphic to user cancellation): the
-            // revoke on the owner thread CAS'd the decision before the
-            // native dismissal was requested.
-            state::cancel_payload(&kind)
-        } else {
-            outcome.unwrap_or_else(|error| ExtOperationPayload::Error { error })
-        };
+    // Only the entered-and-not-abandoned arm ever reaches the port: a
+    // pre-entry failure or a host-retired operation submits no terminal
+    // at all (zero ExtCommandAccepted, zero terminal, zero submissions).
+    if let state::WorkerCompletion::Submit(payload) = completion {
         match &port {
             Some(port) => {
                 let code = port.submit(handle, &payload);

@@ -37,7 +37,7 @@ use windows::Win32::UI::Shell::{
 };
 
 use super::ffi::{take_wide_string, HRESULT_ERROR_CANCELLED};
-use super::worker::{DialogTarget, EntryOutcome, WorkerShared};
+use super::worker::{DialogTarget, WorkerShared};
 use crate::options::error_code;
 use crate::options::{
     terminal, CommonPickOptions, DialogFileFilter, PickDirectoryOptions, PickFileOptions,
@@ -304,15 +304,25 @@ fn run_show_and_extract(
             dialog: wrapper as *mut c_void,
         };
 
-    // Entry evidence: entering the Show call (no prior presentation signal
-    // exists for IFileDialog — design section 5.3).
-    let handshake_alive = shared.send_entry(EntryOutcome::Entered {
-        evidence: "IFileDialog::Show-entry",
-    });
+    // The IModalWindow cast precedes entry (design section 5.3: entering
+    // the Show call is the evidence): its failure is a PRE-entry failure —
+    // the worker never claimed Accepted, so run_worker's transaction
+    // delivers the typed error through the entry handshake and never
+    // submits a terminal.
+    let modal: IModalWindow = match dialog.cast() {
+        Ok(modal) => modal,
+        Err(error) => {
+            *shared.target.lock().unwrap_or_else(|error| error.into_inner()) =
+                DialogTarget::None;
+            return Err(construction_failure(error));
+        }
+    };
 
-    // `Interface::cast` (ancestor QueryInterface) for the IModalWindow::Show
-    // call; safe in the 0.61 binding.
-    let modal: IModalWindow = dialog.cast().map_err(post_entry_failure)?;
+    // Entry evidence: entering the Show call (no prior presentation signal
+    // exists for IFileDialog — design section 5.3). Records the entered
+    // state that gates every later terminal decision.
+    let handshake_alive = shared.send_entry_entered("IFileDialog::Show-entry");
+
     // SAFETY: the modal call runs on the owning STA thread.
     let show = unsafe { modal.Show(None) };
 

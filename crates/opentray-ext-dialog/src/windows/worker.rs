@@ -72,6 +72,13 @@ pub(crate) struct WorkerShared {
     /// The command call already returned `dialog_presentation_failed`:
     /// never submit a terminal for this worker.
     pub(crate) abandoned: AtomicBool,
+    /// True once the worker entered its native modal call (the `Entered`
+    /// handshake fired: `TDN_CREATED`, `Show` entry, or MessageBox entry).
+    /// This is the single pre/post-entry authority: every failure path
+    /// branches on it — a worker that never entered must answer with the
+    /// synchronous typed error and never submit a terminal (design section
+    /// 5.3's pre-Accept transaction).
+    pub(crate) entered: AtomicBool,
     /// The TaskDialog HWND, published at `TDN_CREATED`.
     pub(crate) dialog_hwnd: AtomicIsize,
     /// The dispatcher message-only window, published after creation.
@@ -91,6 +98,7 @@ impl WorkerShared {
             close_requested: AtomicBool::new(false),
             revoked: AtomicBool::new(false),
             abandoned: AtomicBool::new(false),
+            entered: AtomicBool::new(false),
             dialog_hwnd: AtomicIsize::new(0),
             dispatcher_hwnd: AtomicIsize::new(0),
             thread_id: AtomicU32::new(0),
@@ -124,6 +132,16 @@ impl WorkerShared {
             Some(sender) => sender.send(outcome).is_ok(),
             None => false,
         }
+    }
+
+    /// Fires the `Entered` handshake AND records the entered state (the
+    /// pre/post-entry authority). The state records even when the receiving
+    /// half is already gone (the host answered with the synchronous
+    /// timeout error): the worker still entered its native modal, and the
+    /// terminal gate consults `abandoned` for exactly that race.
+    pub(crate) fn send_entry_entered(&self, evidence: &'static str) -> bool {
+        self.entered.store(true, Ordering::Release);
+        self.send_entry(EntryOutcome::Entered { evidence })
     }
 
     /// Takes the handshake sender away (the worker body calls this after
@@ -442,6 +460,7 @@ mod tests {
         assert!(!shared.close_requested.load(Ordering::Relaxed));
         assert!(!shared.revoked.load(Ordering::Relaxed));
         assert!(!shared.abandoned.load(Ordering::Relaxed));
+        assert!(!shared.entered.load(Ordering::Relaxed));
         assert!(matches!(
             *shared.target.lock().unwrap(),
             DialogTarget::None

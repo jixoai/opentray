@@ -422,6 +422,71 @@ pub(crate) fn cancel_payload(kind: &ModalKind) -> ExtOperationPayload {
     }
 }
 
+// ---------------------------------------------------------------------------
+// win32 worker transactions (design section 5.3): the platform-neutral
+// cores behind the windows module's seams. Like the ext-sound
+// PlaybackArbiter, the law lives host-compiled so its invariants run as
+// tests on any host; `windows/` wires the real Win32 halves (the STA
+// worker body, the deferred port shim).
+// ---------------------------------------------------------------------------
+
+/// What one finished dialog worker may deliver (the pre-Accept law's
+/// outcome half). The `entered` state — never the modal outcome's Ok/Err —
+/// picks the arm:
+///
+/// - [`WorkerCompletion::PreEntry`] — the worker never entered its native
+///   modal: no operation exists, no Accepted frame was sent, and NO
+///   terminal may ever be submitted. A failure delivers its typed error
+///   through the entry handshake instead (the synchronous rejection on the
+///   original requestId); a close-race exit carries no error (the
+///   handshake disconnect answers the command).
+/// - [`WorkerCompletion::Submit`] — the worker entered: exactly one
+///   terminal payload (the revoked cancel branch wins over the natural
+///   outcome).
+/// - [`WorkerCompletion::Suppressed`] — the worker entered but the host
+///   already retired the operation through the pre-Accept timeout: silence
+///   is exactly-once.
+#[derive(Debug)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) enum WorkerCompletion {
+    PreEntry {
+        error: Option<TypedExtensionError>,
+    },
+    Submit(ExtOperationPayload),
+    Suppressed,
+}
+
+/// Decides one worker's completion transaction from its tracked state.
+/// `entered` comes from the worker's `entered` flag (set exactly when the
+/// `Entered` handshake fired); `abandoned`/`revoked` from the owner-side
+/// flags.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn worker_completion_transaction(
+    entered: bool,
+    abandoned: bool,
+    revoked: bool,
+    outcome: Result<ExtOperationPayload, TypedExtensionError>,
+    kind: &ModalKind,
+) -> WorkerCompletion {
+    if !entered {
+        // Pre-entry failure transaction (design section 5.3): the typed
+        // error answers the ORIGINAL requestId synchronously through the
+        // entry handshake — no operation, no terminal, ever.
+        return WorkerCompletion::PreEntry {
+            error: outcome.err(),
+        };
+    }
+    if abandoned {
+        return WorkerCompletion::Suppressed;
+    }
+    let payload = if revoked {
+        cancel_payload(kind)
+    } else {
+        outcome.unwrap_or_else(|error| ExtOperationPayload::Error { error })
+    };
+    WorkerCompletion::Submit(payload)
+}
+
 /// Canonicalizes a confirmed existing selection (file/directory pickers):
 /// the absolute realpath when the path exists; the lexical absolute form
 /// when the file vanished between confirmation and canonicalization.
@@ -616,6 +681,124 @@ pub(crate) mod tests {
         match cancel_payload(&picker) {
             ExtOperationPayload::Result { value } => assert_eq!(value, serde_json::json!(null)),
             other => panic!("picker cancel is null: {other:?}"),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // win32 worker completion transaction (design section 5.3 pre-Accept
+    // law). The darwin host cannot run the STA worker body, so these drive
+    // the platform-neutral core the windows module wires (the same
+    // PlaybackArbiter-style seam split as ext-sound).
+    // -------------------------------------------------------------------------
+
+    /// P1 regression: a PRE-entry failure (dialog construction, COM init,
+    /// dispatcher window, pre-TDN_CREATED modal failure) must answer the
+    /// command with the synchronous typed error through the entry
+    /// handshake and produce ZERO terminal frames and ZERO deferred-port
+    /// submissions — `Submit` and `Suppressed` are both wrong here because
+    /// only `Submit` ever reaches the port, and a pre-entry worker never
+    /// may.
+    #[test]
+    fn pre_entry_failure_carries_the_sync_typed_error_and_never_submits() {
+        let completion = worker_completion_transaction(
+            /* entered */ false,
+            /* abandoned */ false,
+            /* revoked */ false,
+            Err(typed_error(
+                error_code::PRESENTATION_FAILED,
+                "the native file dialog could not be constructed",
+            )),
+            &ModalKind::Message(message_options(&["OK"], None)),
+        );
+        match completion {
+            WorkerCompletion::PreEntry { error } => {
+                let error = error.expect("the typed error rides the entry handshake");
+                assert_eq!(error.code, error_code::PRESENTATION_FAILED);
+                assert!(!error.message.is_empty());
+            }
+            other => panic!(
+                "a pre-entry failure must never produce a terminal: {other:?}"
+            ),
+        }
+    }
+
+    /// A pre-entry close-race exit (close requested before the modal) is
+    /// silent: no typed error, no terminal — the handshake disconnect
+    /// answers the command with the synchronous presentation failure.
+    #[test]
+    fn pre_entry_close_race_exit_is_silent() {
+        let completion = worker_completion_transaction(
+            false,
+            false,
+            true, // revoked raced in before entry: still no terminal
+            Ok(ExtOperationPayload::Result {
+                value: serde_json::json!(null),
+            }),
+            &ModalKind::Message(message_options(&["OK"], Some(0))),
+        );
+        assert!(
+            matches!(completion, WorkerCompletion::PreEntry { error: None }),
+            "a pre-entry exit never reaches the port, even revoked"
+        );
+    }
+
+    /// Only post-entry failures become terminal error payloads (Accepted
+    /// was honestly sent first).
+    #[test]
+    fn post_entry_failure_submits_the_terminal_error() {
+        let completion = worker_completion_transaction(
+            true,
+            false,
+            false,
+            Err(typed_error(
+                error_code::PRESENTATION_FAILED,
+                "the native file dialog failed after presentation",
+            )),
+            &ModalKind::Message(message_options(&["OK"], None)),
+        );
+        match completion {
+            WorkerCompletion::Submit(ExtOperationPayload::Error { error }) => {
+                assert_eq!(error.code, error_code::PRESENTATION_FAILED);
+            }
+            other => panic!("a post-entry failure is a terminal error: {other:?}"),
+        }
+    }
+
+    /// The pre-Accept timeout retired the operation on the owner side: the
+    /// late-entering worker stays silent (exactly-once — no second answer,
+    /// no port submission).
+    #[test]
+    fn abandoned_worker_never_submits_after_the_timeout_answer() {
+        let completion = worker_completion_transaction(
+            true,
+            true,
+            false,
+            Ok(ExtOperationPayload::Result {
+                value: serde_json::json!(null),
+            }),
+            &ModalKind::Message(message_options(&["OK"], None)),
+        );
+        assert!(matches!(completion, WorkerCompletion::Suppressed));
+    }
+
+    /// A revoked post-entry worker submits the cancel branch (the owner
+    /// CAS beats the natural outcome).
+    #[test]
+    fn revoked_post_entry_worker_submits_the_cancel_branch() {
+        let completion = worker_completion_transaction(
+            true,
+            false,
+            true,
+            Ok(ExtOperationPayload::Result {
+                value: serde_json::json!({ "response": 0, "suppressed": false }),
+            }),
+            &ModalKind::Message(message_options(&["OK", "Cancel"], Some(1))),
+        );
+        match completion {
+            WorkerCompletion::Submit(ExtOperationPayload::Result { value }) => {
+                assert_eq!(value, serde_json::json!({ "response": 1, "suppressed": false }));
+            }
+            other => panic!("revocation settles through the cancel branch: {other:?}"),
         }
     }
 
