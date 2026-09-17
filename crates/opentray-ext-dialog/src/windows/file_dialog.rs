@@ -399,12 +399,19 @@ fn filter_spec_name(filter: &DialogFileFilter) -> Vec<u16> {
 /// Renders one filter's extension list as the `*.ext;*.ext2` pattern
 /// buffer (`COMDLG_FILTERSPEC` semantics).
 fn filter_spec_pattern(filter: &DialogFileFilter) -> Vec<u16> {
-    let pattern = filter
-        .extensions
-        .iter()
-        .map(|extension| format!("*.{extension}"))
-        .collect::<Vec<_>>()
-        .join(";");
+    let pattern = if filter.extensions.is_empty() {
+        // Defense in depth: the facade rejects empty extension groups, but
+        // the renderer stays total — a lone glob instead of an empty spec
+        // string (an empty COMDLG_FILTERSPEC pattern is meaningless).
+        "*.".to_string()
+    } else {
+        filter
+            .extensions
+            .iter()
+            .map(|extension| format!("*.{extension}"))
+            .collect::<Vec<_>>()
+            .join(";")
+    };
     let mut buffer = pattern.encode_utf16().collect::<Vec<u16>>();
     buffer.push(0);
     buffer

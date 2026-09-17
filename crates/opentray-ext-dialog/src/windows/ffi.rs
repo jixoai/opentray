@@ -197,31 +197,30 @@ mod tests {
         assert_eq!(
             size_of::<TaskDialogConfig>(),
             4 + 4 /* cbSize + pad */
-                + P // hwndParent
-                + P // hInstance
-                + 4 + 4 // dwFlags + pad
-                + P // pszWindowTitle
-                + P // main icon union slot
-                + P // pszMainInstruction
-                + P // pszContent
-                + 4 // cButtons
-                + 4 // padding to the buttons pointer
-                + P // pButtons
-                + 4 // nDefaultButton
-                + 4 // cRadioButtons
-                + 8 // padding to the radio pointer (re-aligns after two u32/i32)
-                + P // pRadioButtons
-                + 4 // nDefaultRadioButton
-                + 4 // padding to the verification pointer
-                + P // pszVerificationText
-                + P // pszExpandedInformation
-                + P // pszExpandedControlText
-                + P // pszCollapsedControlText
-                + P // footer icon union slot
-                + P // pszFooter
-                + P // pfCallback (Option<fn> keeps the pointer niche)
-                + P // lpCallbackData
-                + 4 // cxWidth
+                + P /* hwndParent */
+                + P /* hInstance */
+                + 4 + 4 /* dwFlags + pad */
+                + P /* pszWindowTitle */
+                + P /* main icon union slot */
+                + P /* pszMainInstruction */
+                + P /* pszContent */
+                + 4 /* cButtons */
+                + 4 /* padding to the buttons pointer */
+                + P /* pButtons */
+                + 4 /* nDefaultButton */
+                + 4 /* cRadioButtons */
+                + P /* pRadioButtons (88: already pointer-aligned, no pad) */
+                + 4 /* nDefaultRadioButton */
+                + 4 /* padding to the verification pointer */
+                + P /* pszVerificationText */
+                + P /* pszExpandedInformation */
+                + P /* pszExpandedControlText */
+                + P /* pszCollapsedControlText */
+                + P /* footer icon union slot */
+                + P /* pszFooter */
+                + P /* pfCallback (Option<fn> keeps the pointer niche) */
+                + P /* lpCallbackData */
+                + 4 /* cxWidth */
                 + 4, // tail padding to pointer alignment
             "TASKDIALOGCONFIG must keep the frozen Win32 layout"
         );
@@ -233,14 +232,15 @@ mod tests {
         assert_eq!(offset_of!(TaskDialogConfig, psz_content), 56);
         assert_eq!(offset_of!(TaskDialogConfig, c_buttons), 64);
         assert_eq!(offset_of!(TaskDialogConfig, p_buttons), 72);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_verification_text), 112);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_expanded_information), 120);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_collapsed_control_text), 136);
-        assert_eq!(offset_of!(TaskDialogConfig, footer_icon), 144);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_footer), 152);
-        assert_eq!(offset_of!(TaskDialogConfig, pf_callback), 160);
-        assert_eq!(offset_of!(TaskDialogConfig, lp_callback_data), 168);
-        assert_eq!(offset_of!(TaskDialogConfig, cx_width), 176);
+        assert_eq!(offset_of!(TaskDialogConfig, p_radio_buttons), 88);
+        assert_eq!(offset_of!(TaskDialogConfig, psz_verification_text), 104);
+        assert_eq!(offset_of!(TaskDialogConfig, psz_expanded_information), 112);
+        assert_eq!(offset_of!(TaskDialogConfig, psz_collapsed_control_text), 128);
+        assert_eq!(offset_of!(TaskDialogConfig, footer_icon), 136);
+        assert_eq!(offset_of!(TaskDialogConfig, psz_footer), 144);
+        assert_eq!(offset_of!(TaskDialogConfig, pf_callback), 152);
+        assert_eq!(offset_of!(TaskDialogConfig, lp_callback_data), 160);
+        assert_eq!(offset_of!(TaskDialogConfig, cx_width), 168);
         // TASKDIALOG_BUTTON: i32 + alignment padding + pointer.
         assert_eq!(size_of::<TaskDialogButton>(), 4 + 4 + 8);
     }
