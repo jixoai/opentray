@@ -6,6 +6,7 @@ import {
   type AppIdentity,
   type AppIcon,
   type ExtensionEnvelope,
+  type ExtOperationPayload,
   type Icon,
   type Menu,
   type RequestId,
@@ -48,6 +49,42 @@ export interface OpenTrayClient {
   createTray(options: TrayOptions): Promise<TrayHandle>;
 }
 
+/**
+ * Public result contract of one extension request (add-ext-dialog section
+ * 5.1 / section 5.7 ruling #8): immediate commands settle with the response
+ * envelopes; deferred commands settle with exactly one terminal frame, whose
+ * `result` payload value is surfaced as `value` (an `error` terminal rejects
+ * with `ExtensionOperationError` before this type is produced).
+ */
+export type ExtensionRequestResult<TValue = unknown> =
+  | { kind: "immediate"; events: ExtensionEnvelope[] }
+  | { kind: "terminal"; operationId: string; value: TValue };
+
+/**
+ * Typed rejection for synchronous broker error frames: carries the wire
+ * `code`, the structured `details` payload when the error family freezes one,
+ * and the transport cause when relevant. Consumers match on `code`; the human
+ * `message` is not a contract. The deferred-operation rejection counterpart
+ * is `ExtensionOperationError` (same `{ code, message, details }` family).
+ */
+export class BrokerServerError extends Error {
+  readonly code: string;
+  readonly details?: unknown;
+
+  constructor(
+    code: string,
+    message: string,
+    options: { details?: unknown; cause?: unknown } = {}
+  ) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "BrokerServerError";
+    this.code = code;
+    if (options.details !== undefined) {
+      this.details = options.details;
+    }
+  }
+}
+
 export interface OpenTrayEventfulClient extends OpenTrayClient {
   createTray(options: TrayOptions): Promise<EventfulTrayHandle>;
 }
@@ -61,7 +98,10 @@ export interface TrayHandle {
   setIcon(icon: Icon): Promise<void>;
   loadExtension(options: ExtensionLoadOptions): Promise<void>;
   commandExtension(ext: string, data: unknown): Promise<void>;
-  requestExtension(ext: string, data: unknown): Promise<ExtensionEnvelope[]>;
+  requestExtension<TValue = unknown>(
+    ext: string,
+    data: unknown
+  ): Promise<ExtensionRequestResult<TValue>>;
   extend<TCapability extends object, TOptions = undefined>(
     extension: TrayExtension<TCapability, TOptions>,
     options?: TOptions
@@ -148,7 +188,7 @@ export interface TrayExtensionContext {
   readonly mountId: string;
   ensureLoaded(): Promise<void>;
   command(data: unknown): Promise<void>;
-  request(data: unknown): Promise<ExtensionEnvelope[]>;
+  request<TValue = unknown>(data: unknown): Promise<ExtensionRequestResult<TValue>>;
 }
 
 export interface TrayExtension<
@@ -331,10 +371,10 @@ export function createTrayHandle(
     async commandExtension(ext: string, data: unknown): Promise<void> {
       await this.requestExtension(ext, data);
     },
-    async requestExtension(
+    async requestExtension<TValue = unknown>(
       ext: string,
       data: unknown
-    ): Promise<ExtensionEnvelope[]> {
+    ): Promise<ExtensionRequestResult<TValue>> {
       const requestId = nextRequestId();
       const response = await transport.request({
         type: "ext-command",
@@ -346,9 +386,25 @@ export function createTrayHandle(
       });
       if (response.type === "ack") {
         expectResponse(response, requestId, "ack");
-        return [];
+        return { kind: "immediate", events: [] };
       }
-      return expectResponse(response, requestId, "ext-command-result").events;
+      // A successful deferred terminal settles here: the transport correlates
+      // the terminal through the operation map (no requestId on the wire) and
+      // an `error` terminal has already rejected with ExtensionOperationError.
+      if (response.type === "ext-operation-terminal") {
+        const payload: ExtOperationPayload = response.payload;
+        if (payload.kind !== "result") {
+          // Defensive only: transports reject error terminals themselves, so a
+          // typed error payload reaching this branch is a transport contract
+          // violation, not a user-visible deferred failure.
+          throw new Error(
+            `transport settled a deferred request with an error terminal for ${requestId}`
+          );
+        }
+        return { kind: "terminal", operationId: response.operationId, value: payload.value as TValue };
+      }
+      const result = expectResponse(response, requestId, "ext-command-result");
+      return { kind: "immediate", events: result.events };
     },
     extend<TCapability extends object, TOptions = undefined>(
       extension: TrayExtension<TCapability, TOptions>,
@@ -610,9 +666,11 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
       await ensureLoaded();
       await tray.commandExtension(mountId, data);
     },
-    async request(data: unknown): Promise<ExtensionEnvelope[]> {
+    async request<TValue = unknown>(
+      data: unknown
+    ): Promise<ExtensionRequestResult<TValue>> {
       await ensureLoaded();
-      return tray.requestExtension(mountId, data);
+      return tray.requestExtension<TValue>(mountId, data);
     },
   };
 };
@@ -649,7 +707,11 @@ const expectResponse = <TType extends ServerFrame["type"]>(
   type: TType
 ): Extract<ServerFrame, { type: TType }> => {
   if (frame.type === "error") {
-    throw new Error(`${frame.code}: ${frame.message}`);
+    // Synchronous broker errors share the typed `{ code, message, details }`
+    // family with deferred terminal errors (add-ext-dialog section 7.5).
+    throw new BrokerServerError(frame.code, frame.message, {
+      details: frame.details,
+    });
   }
   if (frame.type !== type) {
     throw new Error(
@@ -679,6 +741,11 @@ const requestIdOf = (frame: ServerFrame): RequestId | undefined => {
       return frame.requestId;
     case "error":
       return frame.requestId;
+    // Deferred-transaction frames never correlate through requestId here:
+    // acceptance settles nothing and the terminal frame has no requestId
+    // (the local broker connection correlates it through the operation map).
+    case "ext-command-accepted":
+    case "ext-operation-terminal":
     case "ready":
     case "event":
     case "app-event":

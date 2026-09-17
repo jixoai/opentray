@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="jixoai.opentray.broker" version="1.0.0.0" processorArchitecture="*"/>
+  <description>OpenTray broker host for tray-first desktop status atoms.</description>
+  <!--
+    comctl6 binding (add-ext-dialog design section 5.3 / task 3.3b): the
+    broker EXE declares the side-by-side dependency so in-process native
+    dialogs (TaskDialogIndirect from opentray-ext-dialog) resolve comctl32
+    v6 instead of the v5 fallback. Everything else stays at the Windows
+    defaults a manifest-less EXE would get: no dpiAware claim (legacy DPI
+    behavior is unchanged) and no requestedExecutionLevel (asInvoker).
+    The dialog extension probes this at runtime and reports a MessageBox
+    fallback in its BackendCapabilities DTO when the dependency is absent
+    (for example when the library is loaded by a host without the
+    manifest); it never silently downgrades commandLink/expander requests.
+  -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+</assembly>

@@ -11,8 +11,28 @@ export * from "./canonical-json";
 export * from "./channel";
 export * from "./webview";
 
-export const PROTOCOL_VERSION = 1;
+/**
+ * Protocol 2 (add-ext-dialog section 5.1) adds the DeferredOperation transaction
+ * frames `ext-command-accepted` and `ext-operation-terminal`. The bump is one
+ * matrix: Node client, broker, socket endpoint, and ready metadata all carry 2,
+ * and a version-1 Init is rejected as incompatible (mirrors the Rust
+ * `opentray-spec` PROTOCOL_VERSION truth).
+ */
+export const PROTOCOL_VERSION = 2;
 export const OPENTRAY_PROTOCOL_FAMILY = "opentray-protocol";
+
+/**
+ * Frozen wire form of a deferred operation id: exactly 16 lowercase hex
+ * digits (the u64 handle's hex projection, add-ext-dialog design reference
+ * section 5.7 ruling #2). Shared parser truth for `ext-command-accepted` and
+ * `ext-operation-terminal`; empty, uppercase, non-hex, or wrong-length ids
+ * are structurally invalid.
+ */
+export const OPERATION_ID_PATTERN = /^[0-9a-f]{16}$/u;
+
+/** Returns true when an unknown value matches the frozen 16-hex operation id form. */
+export const isOperationId = (value: unknown): value is string =>
+  typeof value === "string" && OPERATION_ID_PATTERN.test(value);
 export const OPENTRAY_PROTOCOL_LINE_MAJOR = 1;
 export const OPENTRAY_PROTOCOL_LINE_MINOR = 1;
 
@@ -428,10 +448,62 @@ export interface ExtensionScope {
   ext: string;
 }
 
+/**
+ * Broker-injected command ownership (add-ext-dialog section 5.5): the host derives
+ * `{ appId, trayId, sessionId, instanceGeneration }` for every command
+ * dispatch and extensions must never self-report it. All busy/operation
+ * registries key on this scope; the deferred operation binding is
+ * `(sessionId, instanceGeneration, operationId)`.
+ */
+export interface CommandScope {
+  appId: AppId;
+  trayId: TrayId;
+  sessionId: SessionId;
+  instanceGeneration: number;
+}
+
 export interface ExtensionEnvelope<TData = unknown> {
   scope: ExtensionScope;
+  /**
+   * Present only on the command dispatch path: the broker-injected ownership
+   * scope for this invocation. Event envelopes never carry it.
+   */
+  commandScope?: CommandScope;
   data: TData;
 }
+
+/**
+ * Typed extension error envelope (add-ext-dialog section 7.5): `{ code, message,
+ * details }` with a discriminated `details` JSON shape shared by the Rust
+ * `ExtensionError::Detailed` projection, server error frames, and the Node
+ * typed error factory. Consumers must match on `code`; parsing the human
+ * `message` is forbidden by contract.
+ */
+export interface TypedExtensionError {
+  code: string;
+  message: string;
+  /** Discriminated JSON payload whose shape each error code freezes. Absent for codes without structured detail. */
+  details?: unknown;
+}
+
+/**
+ * Terminal payload of a deferred operation (add-ext-dialog section 5.1 frozen): the
+ * `result` branch resolves the client promise with `value`; the `error`
+ * branch rejects it with a typed extension error. The cancel path is a
+ * `result` payload isomorphic to user cancellation — there is no third
+ * channel.
+ */
+export type ExtOperationPayload =
+  | { kind: "result"; value: unknown }
+  | { kind: "error"; error: TypedExtensionError };
+
+/**
+ * Shared ingress bound for one extension event/terminal record (64 KiB). The
+ * value is the single source of truth for both the EventPort record bound and
+ * the DeferredPort terminal payload bound; the Rust `opentray-spec` crate
+ * exports the same number (Rust/TS fixture parity).
+ */
+export const EXTENSION_EVENT_RECORD_MAX_BYTES = 64 * 1024;
 
 export interface ExtensionArtifactTarget {
   os: string;
@@ -443,6 +515,19 @@ export interface ExpectedExtensionIdentity {
   artifactSetVersion: string;
   contractFingerprint: string;
   target: ExtensionArtifactTarget;
+  /**
+   * Optional embedded-artifact identity-chain inputs (add-ext-dialog section 6.4):
+   * lowercase hex SHA-256 of the resolved library file, verified by the broker
+   * before `dlopen`. Absent means the caller supplied no byte hash
+   * (registry-era identity only).
+   */
+  sha256?: string;
+  /**
+   * Optional build identity carried by the embedded staging manifest; the
+   * broker compares it against the native manifest between `Library::new` and
+   * `init` when provided.
+   */
+  buildIdentity?: string;
 }
 
 /** Operating-system and architecture identity for one broker executable. */
@@ -601,6 +686,26 @@ export type ServerFrame =
       events: ExtensionEnvelope[];
     }
   | {
+      /**
+       * DeferredOperation acceptance (section 5.3): the command did not complete
+       * inside the dispatch; the client keeps the request pending until the
+       * matching `ext-operation-terminal` (or a transport-close rejection).
+       */
+      type: "ext-command-accepted";
+      requestId: RequestId;
+      operationId: string;
+    }
+  | {
+      /**
+       * The single terminal frame of a deferred operation. Exactly one is
+       * delivered per accepted operation; duplicates are dropped by the
+       * broker's owner loop before any frame is written.
+       */
+      type: "ext-operation-terminal";
+      operationId: string;
+      payload: ExtOperationPayload;
+    }
+  | {
       type: "runtime-host-health";
       requestId: RequestId;
       health: RuntimeHostHealth;
@@ -614,7 +719,20 @@ export type ServerFrame =
       ext: string;
       data: unknown;
     }
-  | { type: "error"; requestId?: RequestId; code: string; message: string };
+  | {
+      /**
+       * Synchronous broker error frame. Carries the same typed error envelope
+       * as a deferred terminal's `error` branch (add-ext-dialog design
+       * reference section 7.5): when the error code freezes a structured
+       * payload it rides `details` as a JSON object; the field is absent for
+       * codes without structured detail (never `null`).
+       */
+      type: "error";
+      requestId?: RequestId;
+      code: string;
+      message: string;
+      details?: unknown;
+    };
 
 export interface ParseResult<T> {
   ok: boolean;
@@ -703,6 +821,12 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
         Array.isArray(value.events) &&
         value.events.every(isExtensionEnvelope)
       );
+    case "ext-command-accepted":
+      return (
+        typeof value.requestId === "string" && isOperationId(value.operationId)
+      );
+    case "ext-operation-terminal":
+      return isOperationId(value.operationId) && isExtOperationPayload(value.payload);
     case "runtime-host-health":
       return typeof value.requestId === "string" && isRuntimeHostHealth(value.health);
     case "event":
@@ -719,7 +843,10 @@ export const isServerFrame = (value: unknown): value is ServerFrame => {
       return (
         (value.requestId === undefined || typeof value.requestId === "string") &&
         typeof value.code === "string" &&
-        typeof value.message === "string"
+        typeof value.message === "string" &&
+        // details is a JSON object when present (absent for codes without
+        // structured detail); nulls and scalars are structurally invalid.
+        (value.details === undefined || isRecord(value.details))
       );
     default:
       return false;
@@ -740,8 +867,44 @@ const isExtensionEnvelope = (value: unknown): value is ExtensionEnvelope => {
     typeof scope.appId === "string" &&
     (scope.trayId === undefined || typeof scope.trayId === "string") &&
     typeof scope.ext === "string" &&
+    (value.commandScope === undefined || isCommandScope(value.commandScope)) &&
     "data" in value
   );
+};
+
+/** Returns true when an unknown value is a complete broker-injected command scope. */
+export const isCommandScope = (value: unknown): value is CommandScope =>
+  isRecord(value) &&
+  typeof value.appId === "string" &&
+  typeof value.trayId === "string" &&
+  typeof value.sessionId === "string" &&
+  typeof value.instanceGeneration === "number" &&
+  Number.isInteger(value.instanceGeneration) &&
+  value.instanceGeneration >= 0;
+
+/** Returns true when an unknown value is a complete typed extension error envelope. */
+export const isTypedExtensionError = (value: unknown): value is TypedExtensionError =>
+  isRecord(value) &&
+  typeof value.code === "string" &&
+  typeof value.message === "string" &&
+  // details is a JSON object when present (absent for codes without
+  // structured detail); nulls, scalars, and arrays are structurally invalid
+  // on the synchronous error frame and on deferred terminal errors alike.
+  (value.details === undefined || isRecord(value.details));
+
+/** Parser truth for the frozen terminal payload discriminant (no third branch is guessed). */
+export const isExtOperationPayload = (value: unknown): value is ExtOperationPayload => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  switch (value.kind) {
+    case "result":
+      return "value" in value;
+    case "error":
+      return isTypedExtensionError(value.error);
+    default:
+      return false;
+  }
 };
 
 const isRuntimeHostHealth = (value: unknown): value is RuntimeHostHealth => {
@@ -812,3 +975,138 @@ const isTrayEvent = (value: unknown): value is TrayEvent => {
 
 const isMouseButton = (value: unknown): value is MouseButton =>
   value === "left" || value === "right" || value === "middle";
+
+// ---------------------------------------------------------------------------
+// Sound extension shared schema (add-ext-sound design reference sections 1-2,
+// task 2.1): the schema is promoted to this shared spec so `@opentray/ext-sound`
+// and the `opentray-spec` crate project the same DTO truth. The frozen
+// common-name table and the typed error family live here so facade, native,
+// and broker rejections stay code-identical across the wire.
+// ---------------------------------------------------------------------------
+
+/**
+ * Alert-grade beep kinds (`beep` only, add-ext-sound design reference section
+ * 1.1). Alert grading and named system sounds are two separate semantic
+ * layers: `default`/`info`/`question` never enter the common system sound
+ * catalog.
+ */
+export type BeepKind = "default" | "info" | "warning" | "error" | "question";
+
+/**
+ * Common system sound names (add-ext-sound R1 section 4.1, frozen catalog:
+ * no additions or removals in v1).
+ */
+export type CommonSystemSoundName = "notification" | "warning" | "error";
+
+/** Frozen common-name catalog in wire order; the facade consults it before any native passthrough. */
+export const COMMON_SYSTEM_SOUND_NAMES: readonly CommonSystemSoundName[] = [
+  "notification",
+  "warning",
+  "error",
+];
+
+/**
+ * Frozen per-platform native projection of each common name (add-ext-sound
+ * design reference section 1.2): darwin `NSSound` system catalog names and
+ * win32 registry sound-scheme aliases (`SND_ALIAS`). Both records are frozen;
+ * a changed projection is a contract change, not a data edit.
+ */
+export const COMMON_SYSTEM_SOUND_PROJECTIONS: Readonly<
+  Record<CommonSystemSoundName, { readonly darwin: string; readonly win32: string }>
+> = Object.freeze({
+  notification: Object.freeze({ darwin: "Glass", win32: "SystemAsterisk" }),
+  warning: Object.freeze({ darwin: "Sosumi", win32: "SystemExclamation" }),
+  error: Object.freeze({ darwin: "Basso", win32: "SystemHand" }),
+});
+
+/** Returns true when an unknown value is one of the frozen common system sound names. */
+export const isCommonSystemSoundName = (
+  value: string
+): value is CommonSystemSoundName =>
+  (COMMON_SYSTEM_SOUND_NAMES as readonly string[]).includes(value);
+
+/**
+ * A common name (typed union with autocomplete) or any platform-native sound
+ * name (arbitrary string, resolved at runtime against the platform catalog).
+ */
+export type SystemSoundName = CommonSystemSoundName | (string & {});
+
+/**
+ * v1 deliberately carries no options (add-ext-sound design reference section
+ * 1.3 ruling: the rejection path already excluded volume control). Reserved
+ * empty interface — future fields land in platform namespaces first (dialog
+ * law), never as silently ignored values.
+ */
+export interface PlaySoundOptions {
+  // Intentionally empty in v1.
+}
+
+/**
+ * Shared sound backend capabilities DTO (add-ext-sound design reference
+ * section 2). `fileFormats` is the v1 committed set (finite canonical:
+ * darwin `["wav","aiff","mp3","m4a"]`, win32 `["wav"]`), not a runtime-open
+ * catalog of whatever the OS currently accepts.
+ */
+export interface SoundBackendCapabilities {
+  platform: "darwin" | "win32";
+  /** Platform-native sound-name catalog resolvable (`playSystemSound` passthrough). */
+  systemSoundCatalog: boolean;
+  /** File playback available (`playSound`). */
+  playFile: boolean;
+  fileFormats: readonly string[];
+}
+
+/** Returns true when an unknown value is a complete sound backend capabilities DTO. */
+export const isSoundBackendCapabilities = (
+  value: unknown
+): value is SoundBackendCapabilities => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.platform !== "darwin" && record.platform !== "win32") {
+    return false;
+  }
+  return (
+    typeof record.systemSoundCatalog === "boolean" &&
+    typeof record.playFile === "boolean" &&
+    Array.isArray(record.fileFormats) &&
+    record.fileFormats.every((format) => typeof format === "string")
+  );
+};
+
+/** Typed sound error family (add-ext-sound design reference section 3, frozen at four codes). */
+export const SOUND_ERROR_CODES = {
+  platformUnsupported: "sound_platform_unsupported",
+  notFound: "sound_not_found",
+  formatUnsupported: "sound_format_unsupported",
+  fileUnreadable: "sound_file_unreadable",
+} as const;
+
+export type SoundErrorCode = (typeof SOUND_ERROR_CODES)[keyof typeof SOUND_ERROR_CODES];
+
+const SOUND_ERROR_CODE_VALUES = new Set<string>(Object.values(SOUND_ERROR_CODES));
+
+/** Returns true when an unknown value is one of the frozen typed sound error codes. */
+export const isSoundErrorCode = (value: string): value is SoundErrorCode =>
+  SOUND_ERROR_CODE_VALUES.has(value);
+
+/** How a `sound_not_found` miss was searched, in resolution order (common table first). */
+export type SystemSoundAttemptedMode = "common-table" | "platform-catalog";
+
+/**
+ * Discriminated details payloads for the typed sound error family
+ * (add-ext-sound design reference section 1.2: a miss never stays silent and
+ * never falls back — `sound_not_found` details carry at least the requested
+ * name, the platform, and the attempted modes/catalog).
+ */
+export type SoundErrorDetails =
+  | { kind: "platform"; platform: string }
+  | {
+      kind: "not-found";
+      requested: string;
+      platform: "darwin" | "win32";
+      attempted: readonly SystemSoundAttemptedMode[];
+    }
+  | { kind: "format"; path: string; reason: string }
+  | { kind: "unreadable"; path: string };

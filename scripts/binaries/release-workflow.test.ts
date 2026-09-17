@@ -74,6 +74,14 @@ describe("Feature: release native binary CI law", () => {
     expect(packedConsumerScript()).toContain('"@opentray/packaging"');
     expect(packedJob).toContain("- name: Build publish artifacts");
     expect(packedJob).toContain("run: pnpm run build");
+    // Packed-consumer is the webview closure fixture; the embedded facades
+    // (dialog, sound) are intentionally excluded from this matrix — their
+    // packed-consumer equivalent is the real-pack + unpack identity evidence
+    // below. The exclusion is documented in the plan job's filter comment.
+    expect(packedJob).not.toContain("dialog");
+    expect(workflow).toContain(
+      "have no split platform packages, so their jobs are\n          # intentionally NOT added to this matrix"
+    );
     expect(releaseJob).toContain("- packed-consumer");
     expect(releaseJob.indexOf("- name: Build publish artifacts")).toBeLessThan(
       releaseJob.indexOf("- name: Verify"),
@@ -85,6 +93,22 @@ describe("Feature: release native binary CI law", () => {
     expect(releaseJob).toContain("Stage native artifacts into npm packages");
     expect(releaseJob).toContain("bun run scripts/binaries/stage-release-artifacts.ts");
     expect(releaseJob).toContain("bun run scripts/binaries/validate-package-dirs.ts");
+    // Embedded facades (dialog, sound) get a real-pack size gate plus unpack
+    // identity evidence after staging; dry-run output is never evidence. The
+    // evidence loop iterates the planner's embedded package list generically.
+    expect(releaseJob).toContain("pnpm run check:pack-size");
+    expect(releaseJob).toContain(
+      "bun run scripts/binaries/verify-embedded-pack-evidence.ts"
+    );
+    expect(releaseJob).toContain('--package "$package_dir"');
+    expect(releaseJob).not.toContain("--package packages/ext-dialog");
+    expect(releaseJob).toContain(
+      "needs.plan-native.outputs.embedded-packages != '[]'"
+    );
+    expect(releaseJob).toContain("name: embedded-pack-evidence");
+    expect(releaseJob.indexOf("- name: Validate native package contents")).toBeLessThan(
+      releaseJob.indexOf("pnpm run check:pack-size")
+    );
     expect(releaseJob).toContain("git push origin --tags");
     expect(releaseJob).toContain("Backfill release tags");
     expect(releaseJob).toContain("pnpm exec changeset tag");

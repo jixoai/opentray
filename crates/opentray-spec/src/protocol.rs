@@ -1,14 +1,53 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ext::{ExpectedExtensionIdentity, ExtensionEnvelope};
+use crate::ext::{ExpectedExtensionIdentity, ExtensionEnvelope, TypedExtensionError};
 use crate::model::{
     AppEvent, AppIcon, AppId, AppIdentity, AppOptions, AppRef, Icon, Menu, Rect, SessionId,
     Tooltip, TrayEvent, TrayId, TrayOptions,
 };
 
-pub const PROTOCOL_VERSION: u32 = 1;
+/// Protocol 2 (add-ext-dialog design section 5.1) adds the DeferredOperation
+/// transaction frames `ext-command-accepted` and `ext-operation-terminal`.
+/// The bump is one matrix: Node client, broker, socket endpoint, and ready
+/// metadata all carry 2, and a version-1 Init is rejected with
+/// `incompatible-protocol`.
+pub const PROTOCOL_VERSION: u32 = 2;
 pub type RequestId = String;
+
+/// Wire length of an `operationId`: one u64 handle in lowercase hex.
+pub const OPERATION_ID_HEX_LENGTH: usize = 16;
+
+/// Frozen `operationId` wire form (add-ext-dialog design section 5.7 ruling
+/// 2): exactly 16 ASCII lowercase hex digits. Empty strings, uppercase
+/// letters, non-hex characters, and other lengths are rejected by this
+/// predicate and by frame deserialization; they are never normalized.
+pub fn is_valid_operation_id(value: &str) -> bool {
+    value.len() == OPERATION_ID_HEX_LENGTH
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Serde validation for the frozen `operationId` wire form: deserialization
+/// fails on any string [`is_valid_operation_id`] rejects.
+mod operation_id {
+    use super::is_valid_operation_id;
+    use serde::{Deserialize, Deserializer};
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<String, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        if is_valid_operation_id(&value) {
+            Ok(value)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "operationId must be 16 lowercase hex digits, got {value:?}"
+            )))
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -362,6 +401,30 @@ pub enum ServerFrame {
         request_id: RequestId,
         events: Vec<ExtensionEnvelope>,
     },
+    /// DeferredOperation acceptance (design section 5.3): the command did
+    /// not complete inside the dispatch; the client keeps the request
+    /// pending until the matching `ext-operation-terminal` (or a
+    /// transport-close rejection).
+    ExtCommandAccepted {
+        #[serde(rename = "requestId")]
+        request_id: RequestId,
+        #[serde(
+            rename = "operationId",
+            deserialize_with = "operation_id::deserialize"
+        )]
+        operation_id: String,
+    },
+    /// The single terminal frame of a deferred operation. Exactly one is
+    /// delivered per accepted operation; duplicates are dropped by the
+    /// broker's owner loop before any frame is written.
+    ExtOperationTerminal {
+        #[serde(
+            rename = "operationId",
+            deserialize_with = "operation_id::deserialize"
+        )]
+        operation_id: String,
+        payload: ExtOperationPayload,
+    },
     RuntimeHostHealth {
         #[serde(rename = "requestId")]
         request_id: RequestId,
@@ -386,6 +449,19 @@ pub enum ServerFrame {
         request_id: Option<RequestId>,
         code: String,
         message: String,
+        /// Optional typed-error details (add-ext-dialog design section 7.5):
+        /// when the `code` is an extension error category, this carries the
+        /// discriminated JSON payload so the synchronous error frame is
+        /// isomorphic with deferred terminal errors. Absent for errors
+        /// without structured detail; old peers that never send it
+        /// deserialize unchanged. The shared validator keeps one acceptance
+        /// language across sync frames, FFI details, and deferred terminals.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "crate::ext::deserialize_details_object"
+        )]
+        details: Option<Value>,
     },
 }
 
@@ -395,6 +471,18 @@ pub enum TrayBoundsKind {
     Native,
     Inferred,
     Unavailable,
+}
+
+/// Terminal payload of a deferred operation (design section 5.1 frozen): the
+/// `result` branch resolves the client promise with `value`; the `error`
+/// branch rejects it with a typed extension error. The cancel path is a
+/// `result` payload isomorphic to user cancellation -- there is no third
+/// channel.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExtOperationPayload {
+    Result { value: Value },
+    Error { error: TypedExtensionError },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -414,12 +502,12 @@ mod tests {
         let identity = BrokerEndpointIdentity::new("0.1.0", PROTOCOL_VERSION, "myapp").unwrap();
 
         assert_eq!(identity.caller_label(), "myapp");
-        assert_eq!(identity.endpoint_name(), "opentray-0.1.0-p1-myapp");
+        assert_eq!(identity.endpoint_name(), "opentray-0.1.0-p2-myapp");
         assert_eq!(identity.state_dir_name(), "0.1.0/myapp");
-        assert_eq!(identity.unix_socket_file_name(), "opentray-p1.sock");
+        assert_eq!(identity.unix_socket_file_name(), "opentray-p2.sock");
         assert_eq!(
             identity.windows_pipe_name(),
-            r"\\.\pipe\opentray-0.1.0-p1-myapp"
+            r"\\.\pipe\opentray-0.1.0-p2-myapp"
         );
         assert_eq!(identity.process_title(), "opentray · myapp");
     }
@@ -473,7 +561,7 @@ mod tests {
             serde_json::to_value(init).unwrap(),
             serde_json::json!({
                 "type": "init",
-                "protocolVersion": 1,
+                "protocolVersion": 2,
                 "clientVersion": "0.1.0"
             })
         );
@@ -481,7 +569,7 @@ mod tests {
             serde_json::to_value(ready).unwrap(),
             serde_json::json!({
                 "type": "ready",
-                "protocolVersion": 1,
+                "protocolVersion": 2,
                 "brokerVersion": "0.1.0",
                 "brokerArtifactIdentity": {
                     "packageVersion": "0.1.0",
@@ -545,6 +633,124 @@ mod tests {
     fn protocol_version_check_rejects_mismatch() {
         assert!(is_supported_protocol_version(PROTOCOL_VERSION));
         assert!(!is_supported_protocol_version(PROTOCOL_VERSION + 1));
+        // The version-2 bump retires version 1 exhaustively: an old client's
+        // Init must be refused instead of half-parsed (design section 5.1
+        // frozen matrix).
+        assert!(!is_supported_protocol_version(1));
+    }
+
+    #[test]
+    fn deferred_operation_frames_round_trip_both_payload_branches() {
+        let accepted = ServerFrame::ExtCommandAccepted {
+            request_id: "req-1".to_string(),
+            operation_id: "000000000000000f".to_string(),
+        };
+        let terminal_result = ServerFrame::ExtOperationTerminal {
+            operation_id: "000000000000000f".to_string(),
+            payload: ExtOperationPayload::Result {
+                value: serde_json::json!({ "response": 0, "suppressed": false }),
+            },
+        };
+        let terminal_error = ServerFrame::ExtOperationTerminal {
+            operation_id: "000000000000000f".to_string(),
+            payload: ExtOperationPayload::Error {
+                error: TypedExtensionError {
+                    code: "dialog_dismissal_unavailable".to_string(),
+                    message: "platform cannot observe the dismissal reason".to_string(),
+                    details: Some(serde_json::json!({ "kind": "dismissal" })),
+                },
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(&accepted).unwrap(),
+            serde_json::json!({
+                "type": "ext-command-accepted",
+                "requestId": "req-1",
+                "operationId": "000000000000000f"
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&terminal_result).unwrap(),
+            serde_json::json!({
+                "type": "ext-operation-terminal",
+                "operationId": "000000000000000f",
+                "payload": {
+                    "kind": "result",
+                    "value": { "response": 0, "suppressed": false }
+                }
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(&terminal_error).unwrap(),
+            serde_json::json!({
+                "type": "ext-operation-terminal",
+                "operationId": "000000000000000f",
+                "payload": {
+                    "kind": "error",
+                    "error": {
+                        "code": "dialog_dismissal_unavailable",
+                        "message": "platform cannot observe the dismissal reason",
+                        "details": { "kind": "dismissal" }
+                    }
+                }
+            })
+        );
+
+        // Parser truth: both wire forms deserialize into the same frames.
+        assert_eq!(
+            serde_json::from_value::<ServerFrame>(serde_json::to_value(&accepted).unwrap())
+                .unwrap(),
+            accepted
+        );
+        assert_eq!(
+            serde_json::from_value::<ServerFrame>(serde_json::to_value(&terminal_result).unwrap())
+                .unwrap(),
+            terminal_result
+        );
+        assert_eq!(
+            serde_json::from_value::<ServerFrame>(serde_json::to_value(&terminal_error).unwrap())
+                .unwrap(),
+            terminal_error
+        );
+        // A terminal without a known discriminated branch is rejected, not
+        // guessed.
+        assert!(serde_json::from_value::<ServerFrame>(serde_json::json!({
+            "type": "ext-operation-terminal",
+            "operationId": "000000000000000f",
+            "payload": { "kind": "cancel" }
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn sync_error_details_share_the_single_object_language() {
+        // The synchronous error frame uses the same validator as FFI details
+        // and deferred terminals: absent or a JSON object, never null,
+        // scalars, or arrays (impl review R3).
+        let valid = serde_json::from_value::<ServerFrame>(serde_json::json!({
+            "type": "error",
+            "requestId": "req-1",
+            "code": "dialog_session_busy",
+            "message": "busy",
+            "details": { "owner": "tray-1" }
+        }))
+        .expect("object details accepted");
+        assert!(matches!(&valid, ServerFrame::Error { details: Some(v), .. } if v.is_object()));
+
+        for details in [serde_json::json!(null), serde_json::json!(1), serde_json::json!("s"), serde_json::json!([])] {
+            assert!(
+                serde_json::from_value::<ServerFrame>(serde_json::json!({
+                    "type": "error",
+                    "requestId": "req-1",
+                    "code": "dialog_session_busy",
+                    "message": "busy",
+                    "details": details
+                }))
+                .is_err(),
+                "sync frame must reject non-object details: {details}"
+            );
+        }
     }
 
     #[test]
@@ -559,6 +765,7 @@ mod tests {
             request_id: Some("req-2".to_string()),
             code: "not-initialized".to_string(),
             message: "init required".to_string(),
+            details: None,
         };
 
         assert_eq!(
@@ -578,8 +785,88 @@ mod tests {
                 "requestId": "req-2",
                 "code": "not-initialized",
                 "message": "init required"
+            }),
+            "a details-free error frame stays byte-identical on the wire"
+        );
+    }
+
+    #[test]
+    fn error_frames_carry_typed_details_and_stay_optionally_parseable() {
+        // Synchronous typed errors ride the same `details` JSON as deferred
+        // terminal errors (design section 7.5): the wire must carry it, and
+        // old peers that omit it deserialize unchanged.
+        let error = ServerFrame::Error {
+            request_id: Some("req-9".to_string()),
+            code: "dialog_invalid_options".to_string(),
+            message: "buttons must not be empty".to_string(),
+            details: Some(serde_json::json!({ "kind": "options", "field": "buttons" })),
+        };
+        let wire = serde_json::to_value(&error).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "type": "error",
+                "requestId": "req-9",
+                "code": "dialog_invalid_options",
+                "message": "buttons must not be empty",
+                "details": { "kind": "options", "field": "buttons" }
             })
         );
+        let round: ServerFrame = serde_json::from_value(wire).expect("details round-trip");
+        assert_eq!(round, error);
+
+        let legacy: ServerFrame = serde_json::from_value(serde_json::json!({
+            "type": "error",
+            "requestId": "req-10",
+            "code": "not-initialized",
+            "message": "init required"
+        }))
+        .expect("legacy error frame without details");
+        let expected_legacy = ServerFrame::Error {
+            request_id: Some("req-10".to_string()),
+            code: "not-initialized".to_string(),
+            message: "init required".to_string(),
+            details: None,
+        };
+        assert_eq!(legacy, expected_legacy);
+    }
+
+    /// The frozen operationId wire form is enforced by the parser itself:
+    /// empty, uppercase, non-hex, and wrong-length ids are rejected, never
+    /// normalized (design section 5.7 ruling 2).
+    #[test]
+    fn operation_id_wire_form_is_enforced_by_the_parser() {
+        assert!(is_valid_operation_id("000000000000000f"));
+        assert!(is_valid_operation_id("ffffffffffffffff"));
+        assert!(is_valid_operation_id("0123456789abcdef"));
+
+        // Adversarial ids the predicate and parser must both reject.
+        let adversarial = [
+            "",
+            "000000000000000F",
+            "000000000000000g",
+            "000000000000000z",
+            "000000000000000",
+            "000000000000000ff",
+            "0x0000000000000f",
+            "00000000-0000-000f",
+            "ffffffffffffffff\n",
+        ];
+        for id in adversarial {
+            assert!(!is_valid_operation_id(id), "predicate must reject {id:?}");
+            for frame_type in ["ext-command-accepted", "ext-operation-terminal"] {
+                let raw = serde_json::json!({
+                    "type": frame_type,
+                    "requestId": "req-1",
+                    "operationId": id,
+                    "payload": { "kind": "result", "value": null }
+                });
+                assert!(
+                    serde_json::from_value::<ServerFrame>(raw).is_err(),
+                    "parser must reject operationId {id:?} on {frame_type}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -632,7 +919,7 @@ mod tests {
                 "health": {
                     "pid": 12345,
                     "packageVersion": "0.1.0",
-                    "protocolVersion": 1,
+                    "protocolVersion": 2,
                     "endpoint": "/tmp/opentray.sock",
                     "appId": "com.example.build",
                     "appName": "Build",

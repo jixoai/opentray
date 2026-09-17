@@ -31,6 +31,8 @@ export interface ReleaseNativePlan {
     readonly artifactName: string;
   }[];
   readonly validatePackageDirs: readonly string[];
+  /** Embedded facades staged by this plan; the release pack-evidence gate iterates them generically. */
+  readonly embeddedPackages: readonly string[];
   readonly reason?: string;
 }
 
@@ -82,6 +84,7 @@ export async function resolveReleaseNativePlan(
       jobs: [],
       stageEntries: [],
       validatePackageDirs: [],
+      embeddedPackages: [],
       reason: "no pending changesets or unpublished workspace versions",
     };
   }
@@ -98,6 +101,7 @@ export async function resolveReleaseNativePlan(
       jobs: [],
       stageEntries: [],
       validatePackageDirs: [],
+      embeddedPackages: [],
       reason: "release packages do not publish native package families",
     };
   }
@@ -127,6 +131,7 @@ export async function resolveReleaseNativePlan(
     })),
     stageEntries: stagePlan.stageEntries,
     validatePackageDirs: stagePlan.validatePackageDirs,
+    embeddedPackages: stagePlan.embeddedPackageDirs,
   };
 }
 

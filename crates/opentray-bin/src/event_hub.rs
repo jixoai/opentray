@@ -60,7 +60,10 @@ pub(crate) const EVENT_DRAIN_MAX_RECORDS: usize = 64;
 /// Pairs with the record quantum to bound JSON routing work per wake.
 pub(crate) const EVENT_DRAIN_MAX_BYTES: usize = 128 * 1024;
 /// Rejects pathological one-event payloads while covering ordinary envelopes.
-pub(crate) const EVENT_DATA_MAX_BYTES: usize = 64 * 1024;
+/// Aliases the shared spec constant (add-ext-dialog design section 5.1): the EventPort
+/// record bound and the DeferredPort terminal bound are one number with one
+/// truth, exported for the Rust/TS fixture parity tests.
+pub(crate) const EVENT_DATA_MAX_BYTES: usize = opentray_spec::EXTENSION_EVENT_RECORD_MAX_BYTES;
 /// Makes Latest-key memory and comparison bounded. Tray ids share this
 /// bound (the design freezes "128-byte tray/coalesce key").
 pub(crate) const EVENT_COALESCE_KEY_MAX_BYTES: usize = 128;

@@ -24,7 +24,7 @@ describe("daemon paths", () => {
       "/tmp/opentray-home/.opentray/0.1.0/myapp/runtime/broker.lock"
     );
     expect(paths.endpoint).toBe(
-      "/tmp/opentray-home/.opentray/0.1.0/myapp/opentray-p1.sock"
+      "/tmp/opentray-home/.opentray/0.1.0/myapp/opentray-p2.sock"
     );
   });
 
@@ -42,7 +42,7 @@ describe("daemon paths", () => {
       "/tmp/opentray-home/.opentray/0.1.0/opentray/runtime"
     );
     expect(paths.endpoint).toBe(
-      "/tmp/opentray-home/.opentray/0.1.0/opentray/opentray-p1.sock"
+      "/tmp/opentray-home/.opentray/0.1.0/opentray/opentray-p2.sock"
     );
   });
 
@@ -75,7 +75,7 @@ describe("daemon paths", () => {
     expect(paths.runtimeDir).toBe(
       "C:/Users/example/.opentray/0.2.0/myapp/runtime"
     );
-    expect(paths.endpoint).toBe("\\\\.\\pipe\\opentray-0.2.0-p1-myapp");
+    expect(paths.endpoint).toBe("\\\\.\\pipe\\opentray-0.2.0-p2-myapp");
   });
 
   it("preserves explicit app identity separately from caller label", () => {
@@ -92,7 +92,7 @@ describe("daemon paths", () => {
     expect(paths.appId).toBe("com.example.build");
     expect(paths.appName).toBe("Example Build");
     expect(paths.endpoint).toBe(
-      "/tmp/opentray-home/.opentray/0.1.0/build-tool/opentray-p1.sock"
+      "/tmp/opentray-home/.opentray/0.1.0/build-tool/opentray-p2.sock"
     );
   });
 });

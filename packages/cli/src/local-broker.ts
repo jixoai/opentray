@@ -19,6 +19,7 @@ import {
   type BrokerArtifactIdentity,
   type BrokerEndpointIdentityOptions,
   type ClientRequestFrame,
+  type ExtOperationPayload,
   type RequestId,
   type ServerFrame,
 } from "@opentray/spec";
@@ -32,6 +33,7 @@ import {
 } from "@opentray/packaging";
 
 import type { OpenTrayTransport } from "./client";
+import { BrokerServerError } from "./client";
 import { resolveCallerLabel } from "./daemon/caller-label";
 import { createNodeDaemonDriver, startDaemon, type DaemonDriver } from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
@@ -53,6 +55,69 @@ export type LocalRuntimeEventFrame = Extract<
  * state instead of a failure (P3.6 quit-path finding, 2026-09-12).
  */
 export const BROKER_CONNECTION_CLOSED_MESSAGE = "broker connection closed";
+
+/**
+ * Generic transport-close rejection code for every pending deferred operation
+ * (add-ext-dialog section 5.1 frozen): the core client carries no extension-specific
+ * branch. Extension facades map this shared code onto their public surface
+ * (e.g. ext-dialog's `dialog_transport_closed`) - that mapping is facade work,
+ * never core work.
+ */
+export const EXTENSION_TRANSPORT_CLOSED_CODE = "extension_transport_closed";
+
+/**
+ * Typed rejection every deferred operation settles with: the `error` payload
+ * branch of an `ext-operation-terminal` frame, or the generic
+ * `extension_transport_closed` rejection when the transport dies while an
+ * operation is pending. Consumers match on `code`; the human `message` is not
+ * a contract. `details` carries the wire error's structured payload when the
+ * extension supplied one.
+ */
+export class ExtensionOperationError extends Error {
+  readonly code: string;
+  readonly details?: unknown;
+
+  constructor(
+    code: string,
+    message: string,
+    options: { details?: unknown; cause?: unknown } = {}
+  ) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "ExtensionOperationError";
+    this.code = code;
+    if (options.details !== undefined) {
+      this.details = options.details;
+    }
+  }
+}
+
+const extensionTransportClosedError = (cause: Error): ExtensionOperationError =>
+  new ExtensionOperationError(
+    EXTENSION_TRANSPORT_CLOSED_CODE,
+    "the broker transport closed while a deferred extension operation was pending",
+    { cause }
+  );
+
+/**
+ * Typed handshake rejection for a Ready frame whose protocol version does not
+ * equal the version this client sent in its Init frame: a structurally valid
+ * Ready frame alone must never accept the session (add-ext-dialog batch A
+ * review P1-9). The message names both sides; consumers may match
+ * `instanceof` or the two numeric fields.
+ */
+export class BrokerProtocolVersionError extends Error {
+  readonly clientProtocolVersion: number;
+  readonly brokerProtocolVersion: number;
+
+  constructor(clientProtocolVersion: number, brokerProtocolVersion: number) {
+    super(
+      `broker protocol version mismatch: client=${clientProtocolVersion} broker=${brokerProtocolVersion}`
+    );
+    this.name = "BrokerProtocolVersionError";
+    this.clientProtocolVersion = clientProtocolVersion;
+    this.brokerProtocolVersion = brokerProtocolVersion;
+  }
+}
 
 export interface LocalBrokerClient extends OpenTrayTransport {
   readonly endpoint: string;
@@ -95,6 +160,14 @@ export interface ConnectLocalBrokerOptions extends Partial<BrokerEndpointIdentit
 interface PendingRequest {
   resolve(frame: ServerFrame): void;
   reject(error: Error): void;
+  /**
+   * Set when the matching `ext-command-accepted` frame arrives (add-ext-dialog
+   * section 5.1 pending-until-final): the promise stays pending until exactly one
+   * `ext-operation-terminal` settles it, and a transport death rejects it with
+   * the generic typed `extension_transport_closed` instead of the plain
+   * transport sentinel.
+   */
+  deferredOperation?: string;
 }
 
 interface BrokerSocket {
@@ -248,6 +321,8 @@ class LocalBrokerConnection implements LocalBrokerClient {
   private buffer = "";
   private readonly listeners = new Set<(frame: LocalRuntimeEventFrame) => void>();
   private readonly pending = new Map<RequestId, PendingRequest>();
+  /** operationId -> requestId of accepted-but-unsettled deferred operations. */
+  private readonly deferredOperations = new Map<string, RequestId>();
   private readonly deadListeners = new Set<(error: Error) => void>();
   private deadError: Error | undefined;
   private ready:
@@ -308,6 +383,12 @@ class LocalBrokerConnection implements LocalBrokerClient {
       clientVersion,
     });
     const frame = await ready;
+    // A structurally valid Ready frame is not session authority: the broker
+    // must speak exactly the protocol version this client announced (direct
+    // connections have no daemon-readiness metadata protecting them).
+    if (frame.protocolVersion !== protocolVersion) {
+      throw new BrokerProtocolVersionError(protocolVersion, frame.protocolVersion);
+    }
     if (
       !brokerArtifactIdentityEquals(frame.brokerArtifactIdentity, expectedBrokerArtifactIdentity)
     ) {
@@ -392,7 +473,12 @@ class LocalBrokerConnection implements LocalBrokerClient {
     }
 
     if (frame.type === "error") {
-      const error = new Error(`${frame.code}: ${frame.message}`);
+      // Synchronous server errors keep the typed `{ code, message, details }`
+      // family (add-ext-dialog section 7.5): the same shape a deferred
+      // terminal error rejects with, so consumers match one contract.
+      const error = new BrokerServerError(frame.code, frame.message, {
+        details: frame.details,
+      });
       if (frame.requestId !== undefined) {
         this.pending.get(frame.requestId)?.reject(error);
         this.pending.delete(frame.requestId);
@@ -408,6 +494,16 @@ class LocalBrokerConnection implements LocalBrokerClient {
         return;
       }
       this.rejectAll(error);
+      return;
+    }
+
+    if (frame.type === "ext-command-accepted") {
+      this.acceptDeferredOperation(frame.requestId, frame.operationId);
+      return;
+    }
+
+    if (frame.type === "ext-operation-terminal") {
+      this.settleDeferredOperation(frame.operationId, frame.payload);
       return;
     }
 
@@ -434,6 +530,63 @@ class LocalBrokerConnection implements LocalBrokerClient {
     this.socket.write(`${JSON.stringify(frame)}\n`);
   }
 
+  /**
+   * Pending-until-final acceptance (add-ext-dialog section 5.1): acceptance never
+   * settles the request. The broker's owner loop guarantees exactly one
+   * terminal per operation; a second acceptance for the same request or an
+   * already-bound operationId is defensively ignored, never a second
+   * registration.
+   */
+  private acceptDeferredOperation(requestId: RequestId, operationId: string): void {
+    const entry = this.pending.get(requestId);
+    if (entry === undefined || entry.deferredOperation !== undefined) {
+      return;
+    }
+    if (this.deferredOperations.has(operationId)) {
+      return;
+    }
+    entry.deferredOperation = operationId;
+    this.deferredOperations.set(operationId, requestId);
+  }
+
+  /**
+   * The single terminal settlement: resolves the still-pending request with
+   * the terminal frame (`payload.kind === "result"`), or rejects it with the
+   * typed wire error (`"error"`). Terminals for unknown or already-settled
+   * operationIds are silently dropped - the broker side already settles
+   * through a one-shot CAS; the client mirrors that stateless drop instead of
+   * guessing an owner.
+   */
+  private settleDeferredOperation(operationId: string, payload: ExtOperationPayload): void {
+    const requestId = this.deferredOperations.get(operationId);
+    if (requestId === undefined) {
+      return;
+    }
+    const entry = this.pending.get(requestId);
+    this.deferredOperations.delete(operationId);
+    this.pending.delete(requestId);
+    if (entry === undefined) {
+      return;
+    }
+    if (payload.kind === "result") {
+      // The terminal frame is the correlated server-frame settlement of the
+      // original request; its payload carries the deferred value.
+      const terminal: Extract<ServerFrame, { type: "ext-operation-terminal" }> = {
+        type: "ext-operation-terminal",
+        operationId,
+        payload,
+      };
+      entry.resolve(terminal);
+      return;
+    }
+    const wireError = payload.error;
+    entry.reject(
+      new ExtensionOperationError(wireError.code, wireError.message, {
+        details: wireError.details,
+      }),
+    );
+  }
+
   private rejectAll(error: Error): void {
     this.ready?.reject(error);
     this.ready = undefined;
@@ -441,19 +594,33 @@ class LocalBrokerConnection implements LocalBrokerClient {
       pending.reject(error);
     }
     this.pending.clear();
+    this.deferredOperations.clear();
   }
 
   /**
    * Terminal connection-death transition (D3): first socket error/close wins,
    * rejects everything pending, and notifies every terminal listener exactly
    * once. Later terminal events are no-ops.
+   *
+   * Pending-until-final (add-ext-dialog section 5.1): accepted deferred operations
+   * reject with the generic typed `extension_transport_closed` (the core
+   * client has no extension-name branch); every ordinary pending request
+   * keeps the plain transport sentinel.
    */
   private markDead(error: Error): void {
     if (this.deadError !== undefined) {
       return;
     }
     this.deadError = error;
-    this.rejectAll(error);
+    this.ready?.reject(error);
+    this.ready = undefined;
+    for (const pending of this.pending.values()) {
+      pending.reject(
+        pending.deferredOperation === undefined ? error : extensionTransportClosedError(error),
+      );
+    }
+    this.pending.clear();
+    this.deferredOperations.clear();
     for (const listener of [...this.deadListeners]) {
       try {
         listener(error);
@@ -486,6 +653,11 @@ const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
     case "ext-command-result":
     case "runtime-host-health":
       return frame.requestId;
+    // Acceptance never settles a request (handled before correlation), and a
+    // terminal frame carries no requestId at all: both are routed through the
+    // deferred-operation map in `dispatchFrame`.
+    case "ext-command-accepted":
+    case "ext-operation-terminal":
     case "ready":
     case "event":
     case "app-event":

@@ -281,6 +281,9 @@ impl BadgeExtension {
                 tray_id: Some(tray_id.to_string()),
                 ext: "badge".to_string(),
             },
+            // Response envelopes never carry the host-injected command
+            // scope (add-ext-dialog design section 5.1 out-matrix).
+            command_scope: None,
             data: payload,
         }])
     }

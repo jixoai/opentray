@@ -1,4 +1,5 @@
 export {
+  BrokerServerError,
   createClient,
   createInitFrame,
   createTrayHandle,
@@ -7,6 +8,7 @@ export {
   type AppHandle,
   type EventfulTrayHandle,
   type ExtensionLoadOptions,
+  type ExtensionRequestResult,
   type OpenTrayConnection,
   type OpenTrayClient,
   type OpenTrayEventSource,
@@ -19,10 +21,18 @@ export {
   type TrayHandle,
 } from "./client";
 export {
+  EMBEDDED_STAGING_MANIFEST_PATH,
+  NATIVE_EXTENSION_EMBEDDED_ERROR_CODES,
+  NATIVE_EXTENSION_EMBEDDED_TARGET_MATRIX,
   NativeExtensionArtifactResolutionError,
+  NativeExtensionEmbeddedArtifactError,
   resolveNativeExtensionArtifact,
   type NativeExtensionArch,
   type NativeExtensionArtifact,
+  type NativeExtensionEmbeddedArtifact,
+  type NativeExtensionEmbeddedErrorReason,
+  type NativeExtensionEmbeddedMatrixTarget,
+  type NativeExtensionEmbeddedTarget,
   type NativeExtensionFileArtifact,
   type NativeExtensionIdentitySource,
   type NativeExtensionExpectedIdentity,
@@ -45,6 +55,12 @@ export {
    * end state (e.g. quit paths racing their own teardown).
    */
   BROKER_CONNECTION_CLOSED_MESSAGE,
+  /** Generic core-client rejection code for pending deferred operations on transport death. */
+  EXTENSION_TRANSPORT_CLOSED_CODE,
+  /** Typed rejection for deferred-operation terminals and transport-close deaths. */
+  ExtensionOperationError,
+  /** Typed handshake rejection when the broker Ready frame carries a different protocol version. */
+  BrokerProtocolVersionError,
 } from "./local-broker";
 export type {
   OpenTrayAppBundleOptions,
@@ -74,6 +90,7 @@ export {
   formatUnixSocketPath,
   formatWindowsPipeName,
   isSupportedProtocolVersion,
+  EXTENSION_EVENT_RECORD_MAX_BYTES,
   PROTOCOL_VERSION,
   type AppId,
   type AppEvent,
@@ -89,9 +106,13 @@ export {
   type BrokerEndpointIdentityOptions,
   type ClientFrame,
   type ClientRequestFrame,
+  type CommandScope,
   type DarwinIcon,
   type DarwinIconText,
+  type ExpectedExtensionIdentity,
+  type ExtensionArtifactTarget,
   type ExtensionEnvelope,
+  type ExtOperationPayload,
   type Icon,
   type IconCandidates,
   type IconImage,
@@ -112,5 +133,6 @@ export {
   type TrayOptions,
   type Icon as TrayIcon,
   type Tooltip as TrayTooltip,
+  type TypedExtensionError,
   type Win32Icon,
 } from "@opentray/spec";

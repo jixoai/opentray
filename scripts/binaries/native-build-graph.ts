@@ -13,6 +13,7 @@ import {
 } from "./artifacts";
 import {
   createExtensionArtifactEvidence,
+  isEmbeddedExtensionArtifactKind,
   isExtensionArtifactKind,
   type ExtensionArtifactEvidence,
 } from "./extension-manifest";
@@ -25,9 +26,11 @@ export type NativeBuildTargetName =
   | "windows-arm64"
   | "windows-x64";
 
-export type NativeBuildComponent = "runtime" | "webview" | "badge";
+export type NativeBuildComponent = "runtime" | "webview" | "badge" | "dialog" | "sound";
 export type NativeArtifactKind = NativeStageKind;
 export const badgeDynamicLibraryArtifactName = "libopentray_ext_badge.dylib";
+export const dialogDynamicLibraryArtifactName = "libopentray_ext_dialog.dylib";
+export const soundDynamicLibraryArtifactName = "libopentray_ext_sound.dylib";
 export const extensionInspectorCargoPackage = "opentray-extension-inspector";
 
 export interface NativeBuildTargetConfig {
@@ -139,10 +142,28 @@ const badgeNativeBuildTargets: readonly NativeBuildTargetName[] = [
   "windows-arm64",
   "windows-x64",
 ];
+// Embedded dialog matrix (add-ext-dialog section 6.2): exactly the four
+// darwin/windows cells; linux is not part of the frozen embedded catalog.
+const dialogNativeBuildTargets: readonly NativeBuildTargetName[] = [
+  "darwin-arm64",
+  "darwin-x64",
+  "windows-arm64",
+  "windows-x64",
+];
+// Embedded sound matrix (add-ext-sound design reference section 3): the same
+// four darwin/windows cells as dialog; no linux cell exists.
+const soundNativeBuildTargets: readonly NativeBuildTargetName[] = [
+  "darwin-arm64",
+  "darwin-x64",
+  "windows-arm64",
+  "windows-x64",
+];
 const nativeBuildComponentOrder: readonly NativeBuildComponent[] = [
   "runtime",
   "webview",
   "badge",
+  "dialog",
+  "sound",
 ];
 
 const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentConfig> = {
@@ -172,6 +193,26 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
     artifactKinds: ["badge"],
     inferredPackages: ["@opentray/ext-badge"],
     inferredPackagePrefixes: ["@opentray/ext-badge-"],
+  },
+  dialog: {
+    component: "dialog",
+    allowedTargets: dialogNativeBuildTargets,
+    defaultReleaseTargets: dialogNativeBuildTargets,
+    cargoPackages: ["opentray-ext-dialog", extensionInspectorCargoPackage],
+    artifactKinds: ["dialog"],
+    inferredPackages: ["@opentray/ext-dialog"],
+    // Embedded facade: no split per-platform packages exist to infer from.
+    inferredPackagePrefixes: [],
+  },
+  sound: {
+    component: "sound",
+    allowedTargets: soundNativeBuildTargets,
+    defaultReleaseTargets: soundNativeBuildTargets,
+    cargoPackages: ["opentray-ext-sound", extensionInspectorCargoPackage],
+    artifactKinds: ["sound"],
+    inferredPackages: ["@opentray/ext-sound"],
+    // Embedded facade: no split per-platform packages exist to infer from.
+    inferredPackagePrefixes: [],
   },
 };
 
@@ -212,6 +253,14 @@ export const inferNativeBuildComponentsFromReleasePackages = (
     }
     if (matchesReleasePackage("badge", releasePackage)) {
       inferred.add("badge");
+      continue;
+    }
+    if (matchesReleasePackage("dialog", releasePackage)) {
+      inferred.add("dialog");
+      continue;
+    }
+    if (matchesReleasePackage("sound", releasePackage)) {
+      inferred.add("sound");
       continue;
     }
     if (matchesReleasePackage("runtime", releasePackage)) {
@@ -305,12 +354,25 @@ export const describeReleaseStagePlan = (
 ): {
   readonly stageEntries: readonly ReleaseStageEntry[];
   readonly validatePackageDirs: readonly string[];
+  /**
+   * Facade package directories carrying embedded staging manifests
+   * (`platforms/manifest.json`), derived from the staged artifact kinds. The
+   * CI embedded pack-evidence gate iterates this list generically instead of
+   * hardcoding extension names (add-ext-sound task 5.1).
+   */
+  readonly embeddedPackageDirs: readonly string[];
 } => {
   const packageDirs = new Set<string>();
+  const embeddedKinds = new Set<NativeArtifactKind>();
   const stageEntries = executions.map((execution) => {
     const target = resolveNativeBuildTarget(execution.target);
     for (const component of execution.components) {
       packageDirs.add(resolvePackageDirForComponent(component, target.packageOs, target.arch));
+    }
+    for (const kind of execution.artifactKinds) {
+      if (isExtensionArtifactKind(kind) && isEmbeddedExtensionArtifactKind(kind)) {
+        embeddedKinds.add(kind);
+      }
     }
     return {
       target: execution.target,
@@ -321,6 +383,7 @@ export const describeReleaseStagePlan = (
   return {
     stageEntries,
     validatePackageDirs: [...packageDirs].sort(),
+    embeddedPackageDirs: [...embeddedKinds].sort().map((kind) => `packages/ext-${kind}`),
   };
 };
 
@@ -467,6 +530,22 @@ export const releaseArtifactName = (
         return badgeDynamicLibraryArtifactName;
       }
       throw new Error("badge native artifacts are not published for linux targets");
+    case "dialog":
+      if (packageOs === "windows") {
+        return "opentray_ext_dialog.dll";
+      }
+      if (packageOs === "darwin") {
+        return dialogDynamicLibraryArtifactName;
+      }
+      throw new Error("dialog native artifacts are not published for linux targets");
+    case "sound":
+      if (packageOs === "windows") {
+        return "opentray_ext_sound.dll";
+      }
+      if (packageOs === "darwin") {
+        return soundDynamicLibraryArtifactName;
+      }
+      throw new Error("sound native artifacts are not published for linux targets");
   }
 };
 
@@ -500,6 +579,13 @@ const resolvePackageDirForComponent = (
         throw new Error(`target ${packageOs}-${arch} does not publish badge package directories`);
       }
       return target.badgePackageDir;
+    case "dialog":
+      // Embedded facade: all four targets stage into the single ext-dialog
+      // package directory (platforms/<npm-target>/ subtree).
+      return "packages/ext-dialog";
+    case "sound":
+      // Embedded facade: mirrors dialog (add-ext-sound design reference section 3).
+      return "packages/ext-sound";
   }
 };
 

@@ -37,3 +37,6 @@ packages/create/assets/inter-glyph.ttf
 packages/create/assets/inter-glyph.OFL.txt
 packages/create/assets/create-openspec-template-iOS-Dark-1024@1x.png
 packages/create/assets/create-openspec-template-iOS-Default-1024@1x.png
+
+# staged embedded native artifacts (never committed; produced by stage-release-artifacts)
+packages/*/platforms/

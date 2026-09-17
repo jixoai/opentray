@@ -7,6 +7,7 @@ import {
   inferNativeBuildComponentsFromReleasePackages,
   materializeIndependentNativeBuildExecutions,
   materializeNativeBuildExecutions,
+  releaseArtifactName,
   resolveReleaseTargetsForComponents,
 } from "./native-build-graph";
 
@@ -29,6 +30,18 @@ describe("Feature: shared native build graph", () => {
         "@opentray/ext-badge-windows-x64",
       ])
     ).toEqual(["badge"]);
+  });
+
+  test("Scenario: Given the embedded dialog facade When components are inferred Then the dialog atom is selected alone", () => {
+    expect(
+      inferNativeBuildComponentsFromReleasePackages(["@opentray/ext-dialog"])
+    ).toEqual(["dialog"]);
+  });
+
+  test("Scenario: Given the embedded sound facade When components are inferred Then the sound atom is selected alone", () => {
+    expect(
+      inferNativeBuildComponentsFromReleasePackages(["@opentray/ext-sound"])
+    ).toEqual(["sound"]);
   });
 
   test("Scenario: Given WebView and runtime atoms When a grouped execution is materialized Then preview families can still build one smoke closure", () => {
@@ -131,6 +144,122 @@ describe("Feature: shared native build graph", () => {
     expect(plan.validatePackageDirs).toEqual([
       "packages/ext-badge-darwin-arm64",
       "packages/ext-badge-windows-x64",
+    ]);
+  });
+
+  test("Scenario: Given dialog-only executions When the matrix is resolved Then exactly the four embedded targets build and one facade dir validates", () => {
+    const targets = resolveReleaseTargetsForComponents(["dialog"]);
+    const executions = materializeNativeBuildExecutions(["dialog"], targets);
+    const plan = describeReleaseStagePlan(executions);
+
+    expect(targets).toEqual([
+      "darwin-arm64",
+      "darwin-x64",
+      "windows-arm64",
+      "windows-x64",
+    ]);
+    expect(
+      executions.map((execution) => execution.artifactName)
+    ).toEqual([
+      "native-darwin-arm64-dialog",
+      "native-darwin-x64-dialog",
+      "native-windows-arm64-dialog",
+      "native-windows-x64-dialog",
+    ]);
+    expect(
+      executions.every((execution) =>
+        execution.cargoPackages.includes("opentray-ext-dialog") &&
+        execution.cargoPackages.includes("opentray-extension-inspector")
+      )
+    ).toBe(true);
+    // Embedded facade: all four targets validate the single package dir.
+    expect(plan.validatePackageDirs).toEqual(["packages/ext-dialog"]);
+  });
+
+  test("Scenario: Given a dialog grouped execution When artifact names are resolved Then the frozen library names match the cdylib outputs", () => {
+    expect(releaseArtifactName("dialog", "darwin")).toBe(
+      "libopentray_ext_dialog.dylib"
+    );
+    expect(releaseArtifactName("dialog", "windows")).toBe(
+      "opentray_ext_dialog.dll"
+    );
+    expect(() => releaseArtifactName("dialog", "linux")).toThrow(
+      "dialog native artifacts are not published for linux targets"
+    );
+
+    const [execution] = materializeNativeBuildExecutions(
+      ["webview", "dialog"],
+      ["darwin-arm64"]
+    );
+    expect(execution.components).toEqual(["webview", "dialog"]);
+    expect(execution.artifactKinds).toEqual(["webview", "dialog"]);
+    expect(execution.cargoPackages).toEqual([
+      "opentray-ext-webview",
+      "opentray-extension-inspector",
+      "opentray-ext-dialog",
+    ]);
+  });
+
+  test("Scenario: Given a sound-only execution matrix When it is resolved Then exactly the four embedded targets build and stage into the ext-sound facade", () => {
+    const targets = resolveReleaseTargetsForComponents(["sound"]);
+    const executions = materializeNativeBuildExecutions(["sound"], targets);
+    const plan = describeReleaseStagePlan(executions);
+
+    expect(targets).toEqual([
+      "darwin-arm64",
+      "darwin-x64",
+      "windows-arm64",
+      "windows-x64",
+    ]);
+    expect(
+      executions.map((execution) => execution.artifactName)
+    ).toEqual([
+      "native-darwin-arm64-sound",
+      "native-darwin-x64-sound",
+      "native-windows-arm64-sound",
+      "native-windows-x64-sound",
+    ]);
+    expect(
+      executions.every((execution) =>
+        execution.cargoPackages.includes("opentray-ext-sound") &&
+        execution.cargoPackages.includes("opentray-extension-inspector")
+      )
+    ).toBe(true);
+    expect(
+      executions.every((execution) => execution.artifactKinds.length === 1)
+    ).toBe(true);
+    // Embedded facade: all four targets validate the single package dir.
+    expect(plan.validatePackageDirs).toEqual(["packages/ext-sound"]);
+    // The generic embedded pack-evidence input derives from the staged kinds.
+    expect(plan.embeddedPackageDirs).toEqual(["packages/ext-sound"]);
+  });
+
+  test("Scenario: Given a sound grouped execution When artifact names are resolved Then the frozen library names mirror the dialog cdylib outputs", () => {
+    expect(releaseArtifactName("sound", "darwin")).toBe(
+      "libopentray_ext_sound.dylib"
+    );
+    expect(releaseArtifactName("sound", "windows")).toBe(
+      "opentray_ext_sound.dll"
+    );
+    expect(() => releaseArtifactName("sound", "linux")).toThrow(
+      "sound native artifacts are not published for linux targets"
+    );
+
+    const [execution] = materializeNativeBuildExecutions(
+      ["dialog", "sound"],
+      ["darwin-arm64"]
+    );
+    expect(execution.components).toEqual(["dialog", "sound"]);
+    expect(execution.artifactKinds).toEqual(["dialog", "sound"]);
+    expect(execution.cargoPackages).toEqual([
+      "opentray-ext-dialog",
+      "opentray-extension-inspector",
+      "opentray-ext-sound",
+    ]);
+    const plan = describeReleaseStagePlan([execution]);
+    expect(plan.embeddedPackageDirs.sort()).toEqual([
+      "packages/ext-dialog",
+      "packages/ext-sound",
     ]);
   });
 

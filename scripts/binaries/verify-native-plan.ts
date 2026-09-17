@@ -13,6 +13,8 @@ const verifyNativeComponents: readonly NativeBuildComponent[] = [
   "runtime",
   "webview",
   "badge",
+  "dialog",
+  "sound",
 ];
 
 export interface VerifyNativePlan {
@@ -24,6 +26,8 @@ export interface VerifyNativePlan {
     readonly artifactName: string;
   }[];
   readonly validatePackageDirs: readonly string[];
+  /** Embedded facades staged by this plan; the CI pack-evidence gate iterates them generically. */
+  readonly embeddedPackages: readonly string[];
 }
 
 export interface VerifyNativeJob
@@ -68,6 +72,7 @@ export async function resolveVerifyNativePlan(
     })),
     stageEntries: stagePlan.stageEntries,
     validatePackageDirs: stagePlan.validatePackageDirs,
+    embeddedPackages: stagePlan.embeddedPackageDirs,
   };
 }
 

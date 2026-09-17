@@ -326,6 +326,7 @@ impl ExtensionHostContext for RoutingExtensionHost<'_> {
         };
         self.events.push(ExtensionEnvelope {
             scope,
+            command_scope: None,
             data: envelope.data,
         });
         Ok(())
@@ -411,6 +412,7 @@ mod tests {
                     ext: "claimed-ext".to_string(),
                 },
                 data: serde_json::json!({ "type": r#type }),
+                command_scope: None,
             }
         }
 
@@ -422,6 +424,7 @@ mod tests {
                     ext: self.instance.clone(),
                 },
                 data: serde_json::json!({ "type": r#type }),
+                command_scope: None,
             }
         }
 
@@ -433,6 +436,7 @@ mod tests {
                     ext: self.instance.clone(),
                 },
                 data: serde_json::json!({ "type": r#type }),
+                command_scope: None,
             }
         }
     }
@@ -445,14 +449,18 @@ mod tests {
         fn command(
             &mut self,
             envelope: ExtensionEnvelope,
+            _issued: opentray_core::IssuedOperation,
             host: &mut dyn ExtensionHostContext,
-        ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
+        ) -> Result<opentray_core::ExtensionCommandDisposition, ExtensionError> {
             let pushed = self.claimed_envelope("pushed");
             host.send_event(serde_json::to_vec(&pushed).unwrap().as_slice())?;
-            Ok(vec![ExtensionEnvelope {
-                scope: envelope.scope,
-                data: serde_json::json!({ "type": "mirrored" }),
-            }])
+            Ok(opentray_core::ExtensionCommandDisposition::Immediate(
+                vec![ExtensionEnvelope {
+                    scope: envelope.scope,
+                    command_scope: None,
+                    data: serde_json::json!({ "type": "mirrored" }),
+                }],
+            ))
         }
 
         fn session_closed(
@@ -690,6 +698,8 @@ mod tests {
                 os: "test".to_string(),
                 arch: "test".to_string(),
             },
+            sha256: None,
+            build_identity: None,
         }
     }
 
@@ -905,6 +915,7 @@ mod tests {
                 ext: "push".to_string(),
             },
             data: serde_json::json!({ "type": "pushed" }),
+            command_scope: None,
         });
         assert_eq!(tray_less, 0, "tray-less envelopes are not events");
 
@@ -915,6 +926,7 @@ mod tests {
                 ext: "push".to_string(),
             },
             data: serde_json::json!({ "type": "pushed" }),
+            command_scope: None,
         });
         assert_eq!(
             unknown_instance, 0,
@@ -1151,6 +1163,7 @@ mod tests {
                         ext: "push".to_string(),
                     },
                     data: serde_json::json!({ "from": "a" }),
+                    command_scope: None,
                 },
                 ExtensionEnvelope {
                     scope: ExtensionScope {
@@ -1159,6 +1172,7 @@ mod tests {
                         ext: "push".to_string(),
                     },
                     data: serde_json::json!({ "from": "b" }),
+                    command_scope: None,
                 },
             ],
             &mut |owner, frame| {
@@ -1198,6 +1212,7 @@ mod tests {
                     ext: "push".to_string(),
                 },
                 data: serde_json::json!({ "type": "pushed" }),
+                command_scope: None,
             }],
             &mut |owner, frame| {
                 written.push((owner.to_string(), frame));

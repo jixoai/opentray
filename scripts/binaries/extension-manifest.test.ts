@@ -5,6 +5,9 @@ import { dirname, join } from "node:path";
 
 import {
   EXTENSION_ABI_VERSION,
+  isEmbeddedExtensionArtifactKind,
+  isExtensionArtifactKind,
+  readExpectedExtensionArtifactIdentity,
   resolveExtensionInspectorPath,
   sha256File,
   verifyExtensionArtifactIdentity,
@@ -83,6 +86,44 @@ describe("native extension artifact manifest", () => {
       join("C:\\opentray", "target", "release", "opentray-extension-inspector.exe"),
     );
   });
+
+  it("covers the embedded dialog kind with the same inspector evidence chain", async () => {
+    expect(isExtensionArtifactKind("dialog")).toBe(true);
+    // Embedded kinds have no split per-platform package to verify.
+    expect(isEmbeddedExtensionArtifactKind("dialog")).toBe(true);
+    expect(isEmbeddedExtensionArtifactKind("webview")).toBe(false);
+    expect(isEmbeddedExtensionArtifactKind("badge")).toBe(false);
+
+    const root = await createFixtureWorkspace();
+    const identity = await readExpectedExtensionArtifactIdentity(root, "dialog", {
+      os: "darwin",
+      arch: "arm64",
+    });
+    expect(identity).toEqual({
+      extensionName: "dialog",
+      artifactSetVersion: "2.0.0",
+      contractFingerprint: "dialog-contract-1",
+      target: { os: "darwin", arch: "arm64" },
+    });
+  });
+
+  it("covers the embedded sound kind with the same identity chain and facade layout", async () => {
+    expect(isExtensionArtifactKind("sound")).toBe(true);
+    expect(isExtensionArtifactKind("nope")).toBe(false);
+    expect(isEmbeddedExtensionArtifactKind("sound")).toBe(true);
+
+    const root = await createFixtureWorkspace();
+    const identity = await readExpectedExtensionArtifactIdentity(root, "sound", {
+      os: "win32",
+      arch: "x64",
+    });
+    expect(identity).toEqual({
+      extensionName: "sound",
+      artifactSetVersion: "2.0.0",
+      contractFingerprint: "opentray-ext-sound-contract-1",
+      target: { os: "win32", arch: "x64" },
+    });
+  });
 });
 
 const createFixtureWorkspace = async (): Promise<string> => {
@@ -102,6 +143,22 @@ const createFixtureWorkspace = async (): Promise<string> => {
       version: "2.0.0",
       os: ["darwin"],
       cpu: ["arm64"],
+    }),
+    writeJson(join(root, "packages/ext-dialog/package.json"), {
+      name: "@opentray/ext-dialog",
+      version: "2.0.0",
+    }),
+    writeJson(join(root, "packages/ext-dialog/contract.json"), {
+      extensionName: "dialog",
+      contractFingerprint: "dialog-contract-1",
+    }),
+    writeJson(join(root, "packages/ext-sound/package.json"), {
+      name: "@opentray/ext-sound",
+      version: "2.0.0",
+    }),
+    writeJson(join(root, "packages/ext-sound/contract.json"), {
+      extensionName: "sound",
+      contractFingerprint: "opentray-ext-sound-contract-1",
     }),
   ]);
   return root;

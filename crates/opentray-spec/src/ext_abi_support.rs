@@ -43,12 +43,27 @@ impl ExtensionErrorSlot {
         category: impl Into<String>,
         message: impl Into<String>,
     ) -> ExtResultCode {
+        self.fail_with_details(result, category, message, None)
+    }
+
+    /// [`ExtensionErrorSlot::fail`] with the typed-error `details` payload
+    /// (add-ext-dialog design section 7.5): synchronous FFI failures stay
+    /// isomorphic with deferred terminal errors by carrying the same
+    /// discriminated JSON.
+    pub fn fail_with_details(
+        &self,
+        result: ExtResultCode,
+        category: impl Into<String>,
+        message: impl Into<String>,
+        details: Option<serde_json::Value>,
+    ) -> ExtResultCode {
         *self
             .detail
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = Some(ExtensionErrorDetail {
             category: category.into(),
             message: message.into(),
+            details,
         });
         result
     }

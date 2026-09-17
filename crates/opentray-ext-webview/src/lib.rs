@@ -958,6 +958,9 @@ pub unsafe extern "C" fn opentray_ext_command(
             };
             let events = vec![ExtensionEnvelope {
                 scope: envelope.scope,
+                // Response envelopes never carry the host-injected command
+                // scope (add-ext-dialog design section 5.1 out-matrix).
+                command_scope: None,
                 data,
             }];
             return write_owned_events(out_events_json, &events);
@@ -975,6 +978,7 @@ pub unsafe extern "C" fn opentray_ext_command(
 
     let mut events = vec![ExtensionEnvelope {
         scope: envelope.scope,
+        command_scope: None,
         data: handled.result,
     }];
     for frame in handled.events {
@@ -989,6 +993,7 @@ pub unsafe extern "C" fn opentray_ext_command(
                 tray_id: Some(frame.owner.tray_id.clone()),
                 ext: "webview".to_string(),
             },
+            command_scope: None,
             data,
         });
     }
@@ -1001,6 +1006,7 @@ pub unsafe extern "C" fn opentray_ext_command(
                 tray_id: Some(owner.tray_id.clone()),
                 ext: "webview".to_string(),
             },
+            command_scope: None,
             data,
         });
     }
@@ -2887,6 +2893,7 @@ mod tests {
                     tray_id: Some("tray-1".to_string()),
                     ext: "webview".to_string(),
                 },
+                command_scope: None,
                 data: serde_json::json!({ "type": "hide" }),
             })
             .unwrap(),

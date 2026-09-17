@@ -8,6 +8,7 @@
     "openspec:vision2": "bun run scripts/openspec/vision2-driven.ts",
     "test:openspec:vision": "bun test scripts/openspec/vision-driven.test.ts",
     "test:openspec:vision2": "bun test scripts/openspec/vision2-driven.test.ts",
+    "check:pack-size": "bun run scripts/check-pack-size.ts",
     "packages:list": "pnpm -r list --depth -1",
     "create-opentray": "bun run packages/create/src/bin.ts",
     "create-opentray:dist": "node packages/create/dist/bin.mjs",
@@ -28,10 +29,11 @@
     "trusted-publish:check": "bun run scripts/npm/configure-trusted-publish.ts --check",
     "trusted-publish:configure": "bun run scripts/npm/configure-trusted-publish.ts",
     "trusted-publish:dry-run": "bun run scripts/npm/configure-trusted-publish.ts --dry-run",
-    "verify": "bun test scripts/openspec/vision-driven.test.ts scripts/openspec/vision2-driven.test.ts scripts/npm && bun test scripts/binaries && openspec schema validate vision-driven && openspec schema validate vision2 && cargo test && pnpm run typecheck && pnpm run test && pnpm -r list --depth -1",
+    "verify": "bun run verify:spec-consistency && bun test scripts/openspec/vision-driven.test.ts scripts/openspec/vision2-driven.test.ts scripts/npm && bun test scripts/binaries && openspec schema validate vision-driven && openspec schema validate vision2 && cargo test && pnpm run typecheck && pnpm run test && pnpm -r list --depth -1",
     "verify:packed-consumer": "bun run scripts/binaries/verify-packed-consumer.ts",
     "version-packages": "changeset version",
-    "version-packages:alpha": "changeset version --snapshot alpha"
+    "version-packages:alpha": "changeset version --snapshot alpha",
+    "verify:spec-consistency": "bun run scripts/openspec/check-ext-dialog-sound-consistency.ts"
   },
   "devDependencies": {
     "@changesets/cli": "^2.31.0",

@@ -920,8 +920,15 @@ const createWebviewEndpoint = (
       } catch (error) {
         throw new WebviewExtensionLoadError(context, error);
       }
-      const events = await context.request(command);
-      return events[0]?.data as TResult;
+      const result = await context.request(command);
+      // WebView commands are immediate (V1 command surface): a deferred
+      // terminal for this extension is a contract violation, not a value.
+      if (result.kind !== "immediate") {
+        throw new Error(
+          `webview command ${command.type} settled with an unexpected deferred terminal`
+        );
+      }
+      return result.events[0]?.data as TResult;
     },
     async requestEnvelopes(data: unknown): Promise<ExtensionEnvelope[]> {
       try {
@@ -929,7 +936,13 @@ const createWebviewEndpoint = (
       } catch (error) {
         throw new WebviewExtensionLoadError(context, error);
       }
-      return context.request(data);
+      const result = await context.request(data);
+      if (result.kind !== "immediate") {
+        throw new Error(
+          "webview extension commands are immediate; a deferred terminal is unexpected"
+        );
+      }
+      return result.events;
     },
     onFrame(handler: (frame: unknown) => void): () => void {
       if (!isExtensionEventSourceTray(tray)) {

@@ -160,6 +160,29 @@ function parsePackageDirs(value: string): string[] {
 
 function createPackageEntryExpectations(): ReadonlyMap<string, readonly RequiredPackageEntry[]> {
   const expectations = new Map<string, readonly RequiredPackageEntry[]>();
+  // Embedded extension facades (add-ext-dialog section 6.2; add-ext-sound
+  // design reference section 3 mirrors it): one package directory per kind
+  // carrying the four frozen matrix libraries plus the staging manifest.
+  const embeddedFacadeKinds = [
+    { dir: "packages/ext-dialog", artifactOf: (target: (typeof nativeTargets)[number]) => target.dialogArtifact },
+    { dir: "packages/ext-sound", artifactOf: (target: (typeof nativeTargets)[number]) => target.soundArtifact },
+  ] as const;
+  for (const { dir, artifactOf } of embeddedFacadeKinds) {
+    expectations.set(dir, [
+      ...nativeTargets
+        .map(artifactOf)
+        .filter((artifact): artifact is string => artifact !== undefined)
+        .sort()
+        .map((artifact) => ({
+          path: relativeArtifactPath(dir, artifact),
+          executable: false,
+        })),
+      {
+        path: "platforms/manifest.json",
+        executable: false,
+      },
+    ]);
+  }
   for (const target of nativeTargets) {
     expectations.set(target.runtimePackageDir, [
       {

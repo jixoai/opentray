@@ -11,6 +11,9 @@ on:
       - "scripts/binaries/**"
       - "scripts/ci/**"
       - "scripts/release/**"
+      - "scripts/openspec/**"
+      - "openspec/**"
+      - "package.json"
 
 concurrency:
   group: verify-native-artifacts-${{ github.ref }}
@@ -31,6 +34,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       stage-plan: ${{ steps.plan.outputs.stage-plan }}
       validate-package-dirs: ${{ steps.plan.outputs.validate-package-dirs }}
+      embedded-packages: ${{ steps.plan.outputs.embedded-packages }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -39,6 +43,10 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
+
+      - name: Spec consistency gate
+        shell: bash
+        run: bun run verify:spec-consistency
 
       - name: Resolve native verification plan
         id: plan
@@ -59,11 +67,18 @@ jobs:
           matrix = json.dumps({"include": plan.get("jobs", [])})
           stage_plan = json.dumps(plan.get("stageEntries", []))
           validate_package_dirs = json.dumps(plan.get("validatePackageDirs", []))
+          # Embedded facade packages staged by this plan (dialog, sound, ...):
+          # derived by the planner from the staged artifact kinds, never
+          # hardcoded per extension name (add-ext-sound task 5.1).
+          embedded_packages = json.dumps(
+              sorted(set(plan.get("embeddedPackages", [])))
+          )
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
               handle.write(f"matrix={matrix}\n")
               handle.write(f"stage-plan={stage_plan}\n")
               handle.write(f"validate-package-dirs={validate_package_dirs}\n")
+              handle.write(f"embedded-packages={embedded_packages}\n")
           PY
 
   native-artifacts:
@@ -160,3 +175,34 @@ jobs:
           set -euo pipefail
           bun run scripts/binaries/validate-package-dirs.ts \
             --package-dirs-json '${{ needs.plan-native.outputs.validate-package-dirs }}'
+
+      - name: Pack-size gate (real npm pack) for embedded packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm run check:pack-size 2>&1 | tee embedded-pack-size-receipt.txt
+
+      - name: Embedded pack identity evidence (unpack and re-hash per target)
+        if: needs.plan-native.outputs.embedded-packages != '[]'
+        shell: bash
+        env:
+          EMBEDDED_PACKAGES: ${{ needs.plan-native.outputs.embedded-packages }}
+        run: |
+          set -euo pipefail
+          for package_dir in $(printf '%s' "$EMBEDDED_PACKAGES" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)))'); do
+            echo "::group::Embedded pack identity: ${package_dir}"
+            bun run scripts/binaries/verify-embedded-pack-evidence.ts \
+              --root "$PWD" \
+              --package "$package_dir" 2>&1 | tee "embedded-pack-identity-$(basename "$package_dir").txt"
+            echo "::endgroup::"
+          done
+
+      - name: Upload embedded pack evidence
+        if: needs.plan-native.outputs.embedded-packages != '[]'
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-pack-evidence
+          path: |
+            embedded-pack-size-receipt.txt
+            embedded-pack-identity-*.txt
+          if-no-files-found: error

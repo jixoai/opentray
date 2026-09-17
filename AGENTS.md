@@ -427,6 +427,13 @@ Windows-visible acceptance must include the overlay and frameless geometry smoke
 - `packages/cli` publishes the final public npm package: `opentray`.
 - Every other direct child of `packages/*` publishes as `@opentray/<directory-name>`.
 - Platform binary packages are distribution atoms only; do not place fake binaries in them.
+- Multi-platform packages bundle every platform-native artifact inside the facade package while
+  the npm-pack compressed size stays at or below 3 MB (Owner ruling, 2026-09-16). Reaching 2 MB
+  raises a size-gate warning that requires an explicit Owner split decision before the next
+  embedded release; exceeding 3 MB must be split into per-platform packages
+  (`@opentray/<name>-<os>-<arch>`) without further debate. The workspace pack-size audit enforces
+  the gate (warn at ≥ 2 MB, fail beyond 3 MB) for every package that embeds platform binaries.
+  Packages already published as per-platform release atoms keep their existing shape.
 - Extension packages are capability atoms; they must depend on public OpenTray contracts, not private package internals.
 - Shared TypeScript protocol types belong in `@opentray/spec`.
 
@@ -536,3 +543,63 @@ After merge to `main`, `.github/workflows/release.yml` materializes the versione
 - WebView2 user data must not inherit the broker executable path. Temporary package runners such as 'pnpx' can place 'opentray.exe' deeply enough to make the default WebView2 profile fail during environment creation.
 - The Windows host owns an explicit 'WebContext' profile under '<home>/.opentray/webview/<package-version>/<caller-label>'; 'OPENTRAY_WEBVIEW_DATA_DIR' is the deployment and diagnostic override.
 - 'WebContext' is a retained native resource and must be stored beside 'WebView' so it outlives the child. A WebView2 creation error must include the resolved profile path.
+
+## Dialog And Sound Extension Law
+
+Established by `add-ext-dialog`/`add-ext-sound` (2026-09-17/18; Codex-reviewed — design R1–R7,
+implementation batches A 8.8 / B 9.0 / C 9.1 GO). Design SSOT:
+`openspec/changes/add-ext-dialog/plans/design-reference.md` and
+`openspec/changes/add-ext-sound/plans/design-reference.md`.
+
+- Long-running extension commands complete through the generic DeferredOperation transaction:
+  a broker-issued opaque handle delivered only during command invocation via a versioned
+  `ExtCommandDispositionV1` FFI, exactly one terminal frame whose payload is a frozen
+  result-or-error discriminated union, and an optional versioned DeferredCompletionPort symbol
+  following the EventPort lifetime pattern. The port submit channel is the only cross-thread
+  terminal source; `poll_owner` returns only `Pending` with a deadline, never a terminal.
+  Extensions never reuse the scoped `ExtHostContext` and never emit completion through
+  EventPort. Transport death rejects pending operations with the generic
+  `extension_transport_closed`; facades map it, core never branches on extension names.
+- A modal dialog must never run a native modal call on the winit owner-loop thread. macOS drives
+  `runModalSession` stepping through a broker-owned scheduler (poll returns Pending with a
+  deadline; a broker-owned re-arm wake covers deadline advances; a bounded per-loop quota
+  prevents starvation). Win32 runs each active dialog owner on a bounded dedicated COM STA
+  worker (cap 8, honest `Accepted` = worker entered the native modal call, pre-entry failures
+  are synchronous typed errors on the original requestId, and a worker that has not exited
+  never has its library deinit'd/dlclosed).
+- Win32 pre-entry failure is an explicit entered-state transaction (commit 8663387a): a worker
+  that never entered its native modal produces zero `Accepted` frames, zero terminal frames,
+  and zero port submissions; its typed `dialog_presentation_failed` answers the original
+  requestId synchronously through the entry handshake. Win32 unload-race settlement
+  (commit 91a9b87d): after the bounded join, a successful module self-pin defers cleanup to
+  process exit; a failed self-pin settles as `BlockUnload` — `deinit` parks forever before the
+  instance drop and never returns into the host's FreeLibrary/dlclose while a worker may still
+  execute module code.
+- Dialog picker filters law: omitted/default filters mean all files, and an explicitly empty
+  array is the caller's all-files spelling normalized to wire omission — darwin
+  `setAllowedContentTypes([])` would mean nothing-selectable, and win32 skips `SetFileTypes`
+  for empty lists (commit 3449868b).
+- Dialog command scopes are broker-injected `(appId, trayId, sessionId, instanceGeneration)`;
+  extensions never self-report session identity, and this change family does not expand the
+  single-session caller-scoped broker runtime.
+- Sound playback is fire-and-forget; win32 alias playback always uses
+  `SND_ALIAS | SND_ASYNC | SND_NODEFAULT` (no silent default-sound fallback). The winmm BOOL
+  is NOT an alias miss oracle (real-machine evidence 2026-09-17, commit da37e8e3):
+  `PlaySoundW` under `SND_ALIAS | SND_NODEFAULT` returns nonzero even for a nonexistent alias.
+  The registry sound-scheme catalog (`HKCU\AppEvents\Schemes\Apps\.Default\<name>`) is the
+  authoritative alias miss oracle; a missing key rejects typed `sound_not_found` and the
+  rejection path makes zero native calls.
+- All win32 `PlaySound` paths pass one process-wide PlaybackArbiter that linearizes the native
+  call, return handling, and the `(sessionId, instanceGeneration, sequence)` token under a
+  single mutex; the token covers alias and file playback, never `MessageBeep`. Session close
+  purges (`PlaySound(NULL, SND_PURGE)`) only for the still-matching full token; metadata-only
+  `Atomic*::swap` bookkeeping is outlawed because the swap/play interleave would point the
+  token at one playback while another is actually sounding.
+- Embedded multi-platform facade packaging (≤ 3 MB law) ships a root-contained staging manifest
+  (`platforms/manifest.json`: per-target path/SHA-256/buildIdentity) whose expected identity
+  fields flow through `LoadExt`. The generic embedded-packages CI evidence pipeline (commits
+  44006a7c + 01f3f221: real `npm pack --json --pack-destination` + unpack of the same tarball
+  + per-target identity check, any embedded package joins by list, zero per-package wiring) is
+  the release evidence; a dry run is never release evidence. First receipts (PR #7, CI runs
+  35225263870 / 35234464270): ext-dialog real pack 1,380,024 B (≈1.32 MiB), ext-sound
+  1,064,261 B (≈1.02 MiB) — both under the 2 MB warning line, no Owner split decision owed.

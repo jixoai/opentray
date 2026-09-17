@@ -37,10 +37,10 @@ if (values.source === undefined || values.source.length === 0) {
   throw new Error("--source is required");
 }
 if (
-  !["runtime", "webview", "badge"].includes(values.kind)
+  !["runtime", "webview", "badge", "dialog"].includes(values.kind)
 ) {
   throw new Error(
-    "--kind must be runtime, webview, or badge"
+    "--kind must be runtime, webview, badge, or dialog"
   );
 }
 if ((values["package-os"] === undefined) !== (values.arch === undefined)) {

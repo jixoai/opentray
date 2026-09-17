@@ -3,11 +3,14 @@ use opentray_spec::{
     ClientFrame, ExtensionEnvelope, Rect, RequestId, ServerFrame, SessionId, TrayBoundsKind,
     TrayBoundsResult, TrayEvent, PROTOCOL_VERSION,
 };
+use serde_json::Value;
 
 use crate::{
-    AppBackend, ExtensionError, ExtensionHostContext, ExtensionLoadRequest, ExtensionLoader,
-    Kernel, KernelError, RoutedEvent, UnsupportedExtensionHostContext, UnsupportedExtensionLoader,
+    AppBackend, ExtensionCommandOutcome, ExtensionError, ExtensionHostContext,
+    ExtensionLoadRequest, ExtensionLoader, Kernel, KernelError, RoutedEvent,
+    UnsupportedExtensionHostContext, UnsupportedExtensionLoader,
 };
+use crate::operations::DeferredOperationRegistry;
 
 #[derive(Debug, Clone, Default)]
 pub struct BrokerSession {
@@ -99,6 +102,26 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         )
     }
 
+    /// Creates a broker kernel sharing one deferred-operation registry with
+    /// the composition layer (deferred ports and the owner loop settle
+    /// operations through the same table the kernel issues them into).
+    pub fn with_default_app_options_and_operations(
+        backend: B,
+        extension_loader: L,
+        default_app_options: AppOptions,
+        broker_artifact_identity: BrokerArtifactIdentity,
+        operations: std::sync::Arc<DeferredOperationRegistry>,
+    ) -> Self {
+        Self {
+            kernel: Kernel::with_shared_operations(backend, operations),
+            extension_loader,
+            next_session: 1,
+            default_app: None,
+            default_app_options,
+            broker_artifact_identity,
+        }
+    }
+
     /// Creates a broker kernel with explicit default-app and broker artifact authority.
     pub fn with_default_app_options(
         backend: B,
@@ -118,6 +141,20 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
 
     pub fn backend(&self) -> &B {
         self.kernel.backend()
+    }
+
+    /// Mutable access to the extension registry (add-ext-dialog design
+    /// section 5.2): the owner loop routes broker-owned poll steps to the
+    /// loaded instances through this seam. Instances stay owner-thread
+    /// affine (the `ExtensionInstance` trait carries no `Send` bound).
+    pub fn extensions_mut(&mut self) -> &mut crate::ExtensionRegistry {
+        self.kernel.extensions_mut()
+    }
+
+    /// The shared deferred-operation registry: the composition layer's
+    /// deferred ports validate and settle handles through it.
+    pub fn operations(&self) -> &std::sync::Arc<DeferredOperationRegistry> {
+        self.kernel.operations()
     }
 
     /// Read-only tray liveness and session ownership (generic seam for
@@ -429,20 +466,31 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
                     tray_bounds,
                 };
                 match self.kernel.ext_command_with_host(
-                    &session_id,
+                    session_id,
                     app_id,
                     tray_id,
                     ext,
                     data,
                     &mut scoped_host,
                 ) {
-                    Ok(events) => {
+                    // Immediate keeps the exact V1 semantics: result
+                    // envelopes in one ExtCommandResult plus event frames.
+                    Ok(ExtensionCommandOutcome::Immediate(events)) => {
                         let mut frames = vec![ServerFrame::ExtCommandResult {
                             request_id,
                             events: events.clone(),
                         }];
                         frames.extend(extension_events(events));
                         frames
+                    }
+                    // Deferred: the operation is registered and pending;
+                    // the single terminal arrives later as
+                    // `ext-operation-terminal` routed by the owner loop.
+                    Ok(ExtensionCommandOutcome::Deferred(issued)) => {
+                        vec![ServerFrame::ExtCommandAccepted {
+                            request_id,
+                            operation_id: issued.operation_id,
+                        }]
                     }
                     Err(error) => vec![kernel_error(Some(request_id), error)],
                 }
@@ -565,9 +613,11 @@ fn kernel_error(request_id: Option<RequestId>, error: KernelError) -> ServerFram
             "session-mismatch",
             format!("session {session_id} does not own tray {tray_id} of app {app_id}"),
         ),
-        KernelError::Extension(ExtensionError::Detailed { category, message }) => {
-            protocol_error(request_id, category, message)
-        }
+        KernelError::Extension(ExtensionError::Detailed {
+            category,
+            message,
+            details,
+        }) => protocol_error_with_details(request_id, category, message, details),
         error => protocol_error(request_id, "kernel-error", error.to_string()),
     }
 }
@@ -577,10 +627,23 @@ fn protocol_error(
     code: impl Into<String>,
     message: impl Into<String>,
 ) -> ServerFrame {
+    protocol_error_with_details(request_id, code, message, None)
+}
+
+/// Synchronous typed errors carry their discriminated `details` payload on
+/// the error frame so the wire path is isomorphic with deferred terminal
+/// errors (add-ext-dialog design section 7.5).
+fn protocol_error_with_details(
+    request_id: Option<RequestId>,
+    code: impl Into<String>,
+    message: impl Into<String>,
+    details: Option<Value>,
+) -> ServerFrame {
     ServerFrame::Error {
         request_id,
         code: code.into(),
         message: message.into(),
+        details,
     }
 }
 

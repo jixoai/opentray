@@ -1,24 +1,46 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  COMMON_SYSTEM_SOUND_NAMES,
+  COMMON_SYSTEM_SOUND_PROJECTIONS,
   createBrokerEndpointIdentity,
   compareOpenTrayProtocolLine,
+  EXTENSION_EVENT_RECORD_MAX_BYTES,
   formatBrokerEndpointName,
   formatOpenTrayProtocolLine,
   formatProtocolDistTag,
   formatBrokerStateRoot,
   formatUnixSocketPath,
   formatWindowsPipeName,
+  isCommandScope,
+  isCommonSystemSoundName,
+  isExtOperationPayload,
   isOpenTrayProtocolLineCompatible,
+  isOperationId,
+  isSoundBackendCapabilities,
+  isSoundErrorCode,
   isSupportedProtocolVersion,
+  isTypedExtensionError,
+  OPERATION_ID_PATTERN,
   parseProtocolDistTag,
   OPENTRAY_PROTOCOL_FAMILY,
   OPENTRAY_PROTOCOL_LINE,
   parseServerFrame,
   PROTOCOL_VERSION,
+  SOUND_ERROR_CODES,
+  type BeepKind,
   type ClientFrame,
+  type CommandScope,
+  type ExpectedExtensionIdentity,
+  type ExtOperationPayload,
   type Icon,
   type Menu,
+  type PlaySoundOptions,
+  type ServerFrame,
+  type SoundBackendCapabilities,
+  type SoundErrorDetails,
+  type SystemSoundName,
+  type TypedExtensionError,
 } from "./index";
 
 describe("@opentray/spec", () => {
@@ -195,15 +217,15 @@ describe("@opentray/spec", () => {
     });
 
     expect(identity.callerLabel).toBe("myapp");
-    expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p1-myapp");
+    expect(formatBrokerEndpointName(identity)).toBe("opentray-0.1.0-p2-myapp");
     expect(formatBrokerStateRoot("/Users/example", identity)).toBe(
       "/Users/example/.opentray/0.1.0/myapp"
     );
     expect(formatUnixSocketPath("/Users/example", identity)).toBe(
-      "/Users/example/.opentray/0.1.0/myapp/opentray-p1.sock"
+      "/Users/example/.opentray/0.1.0/myapp/opentray-p2.sock"
     );
     expect(formatWindowsPipeName(identity)).toBe(
-      "\\\\.\\pipe\\opentray-0.1.0-p1-myapp"
+      "\\\\.\\pipe\\opentray-0.1.0-p2-myapp"
     );
   });
 
@@ -304,13 +326,19 @@ describe("@opentray/spec", () => {
   });
 
   it("keeps runtime protocol version separate from install-time protocol tags", () => {
-    expect(PROTOCOL_VERSION).toBe(1);
+    expect(PROTOCOL_VERSION).toBe(2);
     expect(formatProtocolDistTag({ channel: "stable" })).toBe("stable-1-1");
     expect(createBrokerEndpointIdentity({ packageVersion: "0.5.1" })).toEqual({
       packageVersion: "0.5.1",
-      protocolVersion: 1,
+      protocolVersion: 2,
       callerLabel: "opentray",
     });
+  });
+
+  it("retires protocol version 1 exhaustively (v2 matrix, Rust parity)", () => {
+    expect(isSupportedProtocolVersion(PROTOCOL_VERSION)).toBe(true);
+    expect(isSupportedProtocolVersion(1)).toBe(false);
+    expect(isSupportedProtocolVersion(PROTOCOL_VERSION + 1)).toBe(false);
   });
 
   it("rejects ready frames without explicit protocol metadata", () => {
@@ -525,5 +553,480 @@ describe("@opentray/spec", () => {
     );
 
     expect(parsed.ok).toBe(false);
+  });
+});
+
+describe("@opentray/spec DeferredOperation protocol (v2)", () => {
+  const operationId = "000000000000000f";
+
+  it("round-trips the acceptance frame with the 16-hex wire operationId", () => {
+    const accepted: Extract<ServerFrame, { type: "ext-command-accepted" }> = {
+      type: "ext-command-accepted",
+      requestId: "req-1",
+      operationId,
+    };
+    const wire = JSON.stringify(accepted);
+
+    expect(JSON.parse(wire)).toEqual({
+      type: "ext-command-accepted",
+      requestId: "req-1",
+      operationId,
+    });
+    const parsed = parseServerFrame(wire);
+    expect(parsed).toEqual({ ok: true, frame: accepted });
+  });
+
+  it("round-trips terminal frames through both frozen payload branches", () => {
+    const terminalResult: Extract<ServerFrame, { type: "ext-operation-terminal" }> = {
+      type: "ext-operation-terminal",
+      operationId,
+      payload: { kind: "result", value: { response: 0, suppressed: false } },
+    };
+    const terminalError: Extract<ServerFrame, { type: "ext-operation-terminal" }> = {
+      type: "ext-operation-terminal",
+      operationId,
+      payload: {
+        kind: "error",
+        error: {
+          code: "dialog_dismissal_unavailable",
+          message: "platform cannot observe the dismissal reason",
+          details: { kind: "dismissal" },
+        },
+      },
+    };
+
+    const resultWire = JSON.parse(JSON.stringify(terminalResult));
+    expect(resultWire).toEqual({
+      type: "ext-operation-terminal",
+      operationId,
+      payload: { kind: "result", value: { response: 0, suppressed: false } },
+    });
+    const errorWire = JSON.parse(JSON.stringify(terminalError));
+    expect(errorWire).toEqual({
+      type: "ext-operation-terminal",
+      operationId,
+      payload: {
+        kind: "error",
+        error: {
+          code: "dialog_dismissal_unavailable",
+          message: "platform cannot observe the dismissal reason",
+          details: { kind: "dismissal" },
+        },
+      },
+    });
+
+    expect(parseServerFrame(JSON.stringify(terminalResult))).toEqual({
+      ok: true,
+      frame: terminalResult,
+    });
+    expect(parseServerFrame(JSON.stringify(terminalError))).toEqual({
+      ok: true,
+      frame: terminalError,
+    });
+  });
+
+  it("rejects a terminal payload without a known discriminated branch", () => {
+    const cancel = parseServerFrame(
+      JSON.stringify({
+        type: "ext-operation-terminal",
+        operationId,
+        payload: { kind: "cancel" },
+      })
+    );
+    const missingError = parseServerFrame(
+      JSON.stringify({
+        type: "ext-operation-terminal",
+        operationId,
+        payload: { kind: "error" },
+      })
+    );
+    const missingValue = parseServerFrame(
+      JSON.stringify({
+        type: "ext-operation-terminal",
+        operationId,
+        payload: { kind: "result" },
+      })
+    );
+
+    expect(cancel.ok).toBe(false);
+    expect(missingError.ok).toBe(false);
+    expect(missingValue.ok).toBe(false);
+    expect(isExtOperationPayload({ kind: "cancel" })).toBe(false);
+    expect(isExtOperationPayload({ kind: "result", value: null })).toBe(true);
+    expect(isExtOperationPayload({ kind: "error", error: { code: "c", message: "m" } })).toBe(
+      true
+    );
+  });
+
+  it("enforces one details language on typed errors: absent or JSON object", () => {
+    // The synchronous error frame already rejects null/scalar/array details;
+    // deferred terminal errors accept exactly the same language (impl review R2).
+    const objectDetails = { kind: "error", error: { code: "c", message: "m", details: { v: 1 } } };
+    expect(isExtOperationPayload(objectDetails)).toBe(true);
+    expect(isTypedExtensionError(objectDetails.error)).toBe(true);
+    const malformedDetails = [null, 1, "str", [], true];
+    for (const details of malformedDetails) {
+      const payload = { kind: "error", error: { code: "c", message: "m", details } };
+      expect(isExtOperationPayload(payload), `details=${JSON.stringify(details)}`).toBe(false);
+      expect(isTypedExtensionError(payload.error), `details=${JSON.stringify(details)}`).toBe(
+        false
+      );
+      expect(
+        parseServerFrame(
+          JSON.stringify({ type: "ext-operation-terminal", operationId: "0000000000000001", payload })
+        ).ok,
+        `terminal details=${JSON.stringify(details)}`
+      ).toBe(false);
+    }
+  });
+
+  it("rejects acceptance and terminal frames with wrong field types", () => {
+    const acceptedBadOperation = parseServerFrame(
+      JSON.stringify({
+        type: "ext-command-accepted",
+        requestId: "req-1",
+        operationId: 15,
+      })
+    );
+    const terminalBadOperation = parseServerFrame(
+      JSON.stringify({
+        type: "ext-operation-terminal",
+        operationId,
+        payload: "result",
+      })
+    );
+
+    expect(acceptedBadOperation.ok).toBe(false);
+    expect(terminalBadOperation.ok).toBe(false);
+  });
+
+  it("freezes the typed extension error wire shape (details optional both ways)", () => {
+    const error: TypedExtensionError = {
+      code: "dialog_session_busy",
+      message: "owner already shows a dialog",
+      details: { kind: "owner", trayId: "tray-1" },
+    };
+    expect(JSON.parse(JSON.stringify(error))).toEqual({
+      code: "dialog_session_busy",
+      message: "owner already shows a dialog",
+      details: { kind: "owner", trayId: "tray-1" },
+    });
+    expect(isTypedExtensionError(error)).toBe(true);
+    expect(isTypedExtensionError({ code: "c", message: "m" })).toBe(true);
+    expect(isTypedExtensionError({ code: "c" })).toBe(false);
+    expect(isTypedExtensionError({ message: "m" })).toBe(false);
+  });
+
+  it("serializes the broker-injected command scope as camelCase", () => {
+    const scope: CommandScope = {
+      appId: "app-1",
+      trayId: "tray-1",
+      sessionId: "session-1",
+      instanceGeneration: 3,
+    };
+    expect(JSON.parse(JSON.stringify(scope))).toEqual({
+      appId: "app-1",
+      trayId: "tray-1",
+      sessionId: "session-1",
+      instanceGeneration: 3,
+    });
+    expect(isCommandScope(scope)).toBe(true);
+    expect(isCommandScope({ ...scope, trayId: undefined })).toBe(false);
+    expect(isCommandScope({ ...scope, instanceGeneration: -1 })).toBe(false);
+    expect(isCommandScope({ ...scope, instanceGeneration: 1.5 })).toBe(false);
+  });
+
+  it("keeps command envelopes optional and legacy envelopes unchanged", () => {
+    const withScope = {
+      type: "ext-command-result",
+      requestId: "req-1",
+      events: [
+        {
+          scope: { appId: "app-1", trayId: "tray-1", ext: "dialog" },
+          commandScope: {
+            appId: "app-1",
+            trayId: "tray-1",
+            sessionId: "session-1",
+            instanceGeneration: 3,
+          },
+          data: { type: "show" },
+        },
+      ],
+    } as const;
+    const legacy = {
+      type: "ext-command-result",
+      requestId: "req-2",
+      events: [{ scope: { appId: "app-1", ext: "dialog" }, data: {} }],
+    } as const;
+
+    expect(parseServerFrame(JSON.stringify(withScope)).ok).toBe(true);
+    expect(parseServerFrame(JSON.stringify(legacy)).ok).toBe(true);
+    const forgedScope = {
+      type: "ext-command-result",
+      requestId: "req-3",
+      events: [
+        {
+          scope: { appId: "app-1", ext: "dialog" },
+          commandScope: { appId: "app-1" },
+          data: {},
+        },
+      ],
+    };
+    expect(parseServerFrame(JSON.stringify(forgedScope)).ok).toBe(false);
+  });
+
+  it("keeps the embedded identity-chain inputs optional both ways", () => {
+    const legacy: ExpectedExtensionIdentity = {
+      extensionName: "dialog",
+      artifactSetVersion: "1.0.0",
+      contractFingerprint: "opentray-ext-dialog-contract-1",
+      target: { os: "darwin", arch: "arm64" },
+    };
+    expect(JSON.parse(JSON.stringify(legacy))).toEqual({
+      extensionName: "dialog",
+      artifactSetVersion: "1.0.0",
+      contractFingerprint: "opentray-ext-dialog-contract-1",
+      target: { os: "darwin", arch: "arm64" },
+    });
+
+    const chained: ExpectedExtensionIdentity = {
+      ...legacy,
+      sha256: "a".repeat(64),
+      buildIdentity: "build-123",
+    };
+    const wire = JSON.parse(JSON.stringify(chained));
+    expect(wire.sha256).toBe("a".repeat(64));
+    expect(wire.buildIdentity).toBe("build-123");
+  });
+
+  it("exports the shared 64 KiB record bound (Rust fixture parity)", () => {
+    expect(EXTENSION_EVENT_RECORD_MAX_BYTES).toBe(65536);
+    expect(EXTENSION_EVENT_RECORD_MAX_BYTES).toBe(64 * 1024);
+  });
+
+  it("rejects operation ids outside the frozen 16-lowercase-hex wire form", () => {
+    expect(isOperationId("000000000000000f")).toBe(true);
+    expect(isOperationId("ffffffffffffffff")).toBe(true);
+    // Adversarial forms: empty, uppercase, non-hex, too short, too long.
+    expect(isOperationId("")).toBe(false);
+    expect(isOperationId("000000000000000F")).toBe(false);
+    expect(isOperationId("00000000000000zz")).toBe(false);
+    expect(isOperationId("000000000000000")).toBe(false);
+    expect(isOperationId("000000000000000ff")).toBe(false);
+    expect(isOperationId(15)).toBe(false);
+    expect(OPERATION_ID_PATTERN.test("0".repeat(16))).toBe(true);
+
+    for (const badOperationId of [
+      "",
+      "000000000000000F",
+      "00000000000000zz",
+      "0".repeat(15),
+      "0".repeat(17),
+    ]) {
+      const accepted = parseServerFrame(
+        JSON.stringify({
+          type: "ext-command-accepted",
+          requestId: "req-1",
+          operationId: badOperationId,
+        })
+      );
+      const terminal = parseServerFrame(
+        JSON.stringify({
+          type: "ext-operation-terminal",
+          operationId: badOperationId,
+          payload: { kind: "result", value: null },
+        })
+      );
+      expect(accepted.ok).toBe(false);
+      expect(terminal.ok).toBe(false);
+    }
+  });
+
+  it("carries optional structured details on synchronous error frames", () => {
+    const withDetails = parseServerFrame(
+      JSON.stringify({
+        type: "error",
+        requestId: "req-1",
+        code: "dialog_presentation_failed",
+        message: "worker did not reach the native modal call",
+        details: { worker: "owner-1", phase: "enter-modal" },
+      })
+    );
+    expect(withDetails).toEqual({
+      ok: true,
+      frame: {
+        type: "error",
+        requestId: "req-1",
+        code: "dialog_presentation_failed",
+        message: "worker did not reach the native modal call",
+        details: { worker: "owner-1", phase: "enter-modal" },
+      },
+    });
+
+    const withoutDetails = parseServerFrame(
+      JSON.stringify({
+        type: "error",
+        requestId: "req-2",
+        code: "unsupported",
+        message: "unknown command",
+      })
+    );
+    expect(withoutDetails).toEqual({
+      ok: true,
+      frame: {
+        type: "error",
+        requestId: "req-2",
+        code: "unsupported",
+        message: "unknown command",
+      },
+    });
+    expect("details" in (withoutDetails.frame as { details?: unknown })).toBe(false);
+
+    // Nulls, scalars, and arrays are structurally invalid details payloads.
+    for (const badDetails of [null, "text", 7, ["not", "an", "object"]]) {
+      const bad = parseServerFrame(
+        JSON.stringify({
+          type: "error",
+          requestId: "req-3",
+          code: "c",
+          message: "m",
+          details: badDetails,
+        })
+      );
+      expect(bad.ok).toBe(false);
+    }
+  });
+
+  it("keeps the payload discriminated union exhaustive at the type level", () => {
+    const payloads: ExtOperationPayload[] = [
+      { kind: "result", value: null },
+      { kind: "error", error: { code: "c", message: "m" } },
+    ];
+    for (const payload of payloads) {
+      if (payload.kind === "result") {
+        expect(payload.value).toBeDefined();
+      } else {
+        expect(payload.error.code).toBe("c");
+      }
+    }
+  });
+});
+
+describe("@opentray/spec sound schema (add-ext-sound task 2.1)", () => {
+  it("freezes the common system sound table at exactly three names with exact platform projections", () => {
+    expect(COMMON_SYSTEM_SOUND_NAMES).toEqual(["notification", "warning", "error"]);
+    // Exhaustive key parity: every frozen name has a projection, no extras.
+    expect(Object.keys(COMMON_SYSTEM_SOUND_PROJECTIONS).sort()).toEqual(
+      [...COMMON_SYSTEM_SOUND_NAMES].sort()
+    );
+    expect(COMMON_SYSTEM_SOUND_PROJECTIONS.notification).toEqual({
+      darwin: "Glass",
+      win32: "SystemAsterisk",
+    });
+    expect(COMMON_SYSTEM_SOUND_PROJECTIONS.warning).toEqual({
+      darwin: "Sosumi",
+      win32: "SystemExclamation",
+    });
+    expect(COMMON_SYSTEM_SOUND_PROJECTIONS.error).toEqual({
+      darwin: "Basso",
+      win32: "SystemHand",
+    });
+    expect(Object.isFrozen(COMMON_SYSTEM_SOUND_PROJECTIONS)).toBe(true);
+    for (const name of COMMON_SYSTEM_SOUND_NAMES) {
+      expect(Object.isFrozen(COMMON_SYSTEM_SOUND_PROJECTIONS[name])).toBe(true);
+    }
+  });
+
+  it("keeps beep-only kinds out of the common sound catalog (two semantic layers)", () => {
+    for (const beepOnly of ["default", "info", "question"] as const) {
+      expect(isCommonSystemSoundName(beepOnly)).toBe(false);
+      expect(COMMON_SYSTEM_SOUND_NAMES).not.toContain(beepOnly);
+    }
+    const beepKinds: readonly BeepKind[] = [
+      "default",
+      "info",
+      "warning",
+      "error",
+      "question",
+    ];
+    expect(beepKinds).toHaveLength(5);
+    for (const common of COMMON_SYSTEM_SOUND_NAMES) {
+      expect(isCommonSystemSoundName(common)).toBe(true);
+    }
+  });
+
+  it("types system sound names as the frozen union plus arbitrary native strings", () => {
+    const common: SystemSoundName = "notification";
+    const nativeDarwin: SystemSoundName = "Basso";
+    const nativeWin32: SystemSoundName = "SystemDefault";
+    expect([common, nativeDarwin, nativeWin32].every((name) => typeof name === "string")).toBe(
+      true
+    );
+  });
+
+  it("keeps PlaySoundOptions reserved but empty in v1", () => {
+    const options: PlaySoundOptions = {};
+    expect(Object.keys(options)).toEqual([]);
+  });
+
+  it("guards the backend capabilities DTO shape", () => {
+    const darwinBackend: SoundBackendCapabilities = {
+      platform: "darwin",
+      systemSoundCatalog: true,
+      playFile: true,
+      fileFormats: ["wav", "aiff", "mp3", "m4a"],
+    };
+    expect(isSoundBackendCapabilities(darwinBackend)).toBe(true);
+    const win32Backend: SoundBackendCapabilities = {
+      platform: "win32",
+      systemSoundCatalog: true,
+      playFile: true,
+      fileFormats: ["wav"],
+    };
+    expect(isSoundBackendCapabilities(win32Backend)).toBe(true);
+
+    expect(isSoundBackendCapabilities({ ...darwinBackend, platform: "linux" })).toBe(false);
+    expect(isSoundBackendCapabilities({ ...darwinBackend, playFile: "yes" })).toBe(false);
+    expect(isSoundBackendCapabilities({ ...darwinBackend, fileFormats: "wav" })).toBe(false);
+    expect(isSoundBackendCapabilities({ ...darwinBackend, fileFormats: [3] })).toBe(false);
+    expect(isSoundBackendCapabilities(null)).toBe(false);
+    expect(isSoundBackendCapabilities(["not", "a", "record"])).toBe(false);
+  });
+
+  it("freezes the typed sound error family at exactly four codes", () => {
+    expect(SOUND_ERROR_CODES).toEqual({
+      platformUnsupported: "sound_platform_unsupported",
+      notFound: "sound_not_found",
+      formatUnsupported: "sound_format_unsupported",
+      fileUnreadable: "sound_file_unreadable",
+    });
+    expect(isSoundErrorCode("sound_not_found")).toBe(true);
+    expect(isSoundErrorCode("sound_platform_unsupported")).toBe(true);
+    expect(isSoundErrorCode("sound_format_unsupported")).toBe(true);
+    expect(isSoundErrorCode("sound_file_unreadable")).toBe(true);
+    expect(isSoundErrorCode("dialog_platform_unsupported")).toBe(false);
+    expect(isSoundErrorCode("extension_transport_closed")).toBe(false);
+  });
+
+  it("keeps the not-found details payload discriminated with attempted modes", () => {
+    const details: SoundErrorDetails = {
+      kind: "not-found",
+      requested: "Funk",
+      platform: "darwin",
+      attempted: ["common-table", "platform-catalog"],
+    };
+    if (details.kind === "not-found") {
+      expect(details.requested).toBe("Funk");
+      expect(details.platform).toBe("darwin");
+      expect(details.attempted).toEqual(["common-table", "platform-catalog"]);
+    }
+    const platformDetails: SoundErrorDetails = { kind: "platform", platform: "linux" };
+    const formatDetails: SoundErrorDetails = {
+      kind: "format",
+      path: "/tmp/tone.wav",
+      reason: "riff-magic",
+    };
+    const unreadableDetails: SoundErrorDetails = { kind: "unreadable", path: "/tmp/missing.wav" };
+    expect([platformDetails, formatDetails, unreadableDetails]).toHaveLength(3);
   });
 });

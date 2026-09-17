@@ -27,6 +27,13 @@ winit = "0.30"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes"] }
 
+[build-dependencies]
+# RT_MANIFEST wiring (add-ext-dialog task 3.3b). winresource is the actively
+# maintained successor of the unmaintained `winres` and embeds resources with
+# a pure-Rust COFF writer, so no external rc.exe/windres is required on any
+# build host. See build.rs for the full selection rationale.
+winresource = "0.1"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSApplication", "NSResponder"] }

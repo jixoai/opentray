@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 
 import {
@@ -10,13 +10,19 @@ import {
   stageArtifact,
 } from "./artifacts";
 import {
+  isEmbeddedExtensionArtifactKind,
   isExtensionArtifactKind,
+  sha256File,
   verifyExtensionPlatformPackageTarget,
   verifyRecordedExtensionArtifact,
   type EmbeddedExtensionManifest,
   type ExtensionArtifactEvidence,
   type ExtensionArtifactKind,
 } from "./extension-manifest";
+import {
+  buildEmbeddedStagingManifest,
+  type EmbeddedStagingTargetEvidence,
+} from "./embedded-staging-manifest";
 import { parseNativeBuildTargetName, resolveNativeBuildTarget } from "./native-build-graph";
 
 interface StagePlanEntry {
@@ -48,7 +54,21 @@ if (values["stage-plan-json"] === undefined || values["stage-plan-json"].trim().
   throw new Error("--stage-plan-json is required");
 }
 
+/** Frozen per-kind embedded facade directory (shared `packages/ext-<kind>` layout). */
+const embeddedFacadeDirForKind = (kind: ExtensionArtifactKind): string =>
+  `packages/ext-${kind}`;
+
 const stagePlan = parseStagePlan(values["stage-plan-json"]);
+/**
+ * Embedded extension staging (dialog, sound; add-ext-dialog section 6.4,
+ * add-ext-sound design reference section 3): one evidence map per embedded
+ * facade kind, keyed by the npm target name. The frozen per-kind facade
+ * directory follows the shared `packages/ext-<kind>` layout.
+ */
+const embeddedStagedTargets = new Map<
+  ExtensionArtifactKind,
+  Map<string, EmbeddedStagingTargetEvidence>
+>();
 for (const entry of stagePlan) {
   const targetName = parseNativeBuildTargetName(entry.target);
   const target = resolveNativeBuildTarget(targetName);
@@ -80,16 +100,81 @@ for (const entry of stagePlan) {
       { os: packageTarget.npmOs, arch: packageTarget.arch },
       evidence,
     );
-    await verifyExtensionPlatformPackageTarget(
-      values.root ?? process.cwd(),
-      resolveExtensionPlatformPackageDir(packageTarget, evidence.kind),
-      { os: packageTarget.npmOs, arch: packageTarget.arch },
-    );
+    // Embedded kinds (dialog) have no split per-platform package.json to
+    // cross-check; the facade identity chain above is the full check
+    // (add-ext-dialog section 6.4).
+    if (!isEmbeddedExtensionArtifactKind(evidence.kind)) {
+      await verifyExtensionPlatformPackageTarget(
+        values.root ?? process.cwd(),
+        resolveExtensionPlatformPackageDir(packageTarget, evidence.kind),
+        { os: packageTarget.npmOs, arch: packageTarget.arch },
+      );
+    }
   }
   for (const fileName of manifest.files) {
     const source = join(artifactDirectory, fileName);
     const destination = resolveStageDestinationForArtifactFile(packageTarget, fileName);
     await stageArtifact(values.root ?? process.cwd(), source, destination);
+  }
+
+  // Embedded extension branch: collect the per-kind, per-target evidence cell
+  // from the staged bytes (re-hashed here; the hash in the downloaded
+  // evidence was already verified against the source file above).
+  for (const evidence of manifest.extensionArtifacts) {
+    if (!isEmbeddedExtensionArtifactKind(evidence.kind)) {
+      continue;
+    }
+    const npmTarget = `${packageTarget.npmOs}-${packageTarget.arch}`;
+    const destination = resolveStageDestination(packageTarget, evidence.kind);
+    const stagedSha256 = await sha256File(join(values.root ?? process.cwd(), destination));
+    if (stagedSha256 !== evidence.sha256) {
+      throw new Error(
+        `staged ${evidence.kind} library bytes do not match the recorded evidence: target=${npmTarget} expected=${evidence.sha256} actual=${stagedSha256}`,
+      );
+    }
+    let targets = embeddedStagedTargets.get(evidence.kind);
+    if (targets === undefined) {
+      targets = new Map<string, EmbeddedStagingTargetEvidence>();
+      embeddedStagedTargets.set(evidence.kind, targets);
+    }
+    if (targets.has(npmTarget)) {
+      throw new Error(
+        `stage plan stages the embedded ${evidence.kind} target ${npmTarget} more than once`,
+      );
+    }
+    targets.set(npmTarget, {
+      path: embeddedFacadeRelativePath(evidence.kind, destination),
+      sha256: stagedSha256,
+      buildIdentity: evidence.manifest.buildIdentity,
+    });
+  }
+}
+
+// Embedded staging manifests (add-ext-dialog section 6.4; add-ext-sound
+// section 3): written only after the complete four-target matrix has been
+// collected per kind; any missing cell, hash mismatch, or identity skew above
+// failed the run before reaching this point.
+if (embeddedStagedTargets.size > 0) {
+  const root = values.root ?? process.cwd();
+  for (const kind of [...embeddedStagedTargets.keys()].sort()) {
+    const targets = embeddedStagedTargets.get(kind) as Map<string, EmbeddedStagingTargetEvidence>;
+    const facadeDir = embeddedFacadeDirForKind(kind);
+    const identity = await readEmbeddedFacadeIdentity(kind, root);
+    const stagingManifest = buildEmbeddedStagingManifest({
+      facadeVersion: identity.facadeVersion,
+      contractFingerprint: identity.contractFingerprint,
+      targets: Object.fromEntries(targets),
+    });
+    const manifestDestination = join(facadeDir, "platforms", "manifest.json");
+    await mkdir(dirname(join(root, manifestDestination)), { recursive: true });
+    await writeFile(
+      join(root, manifestDestination),
+      `${JSON.stringify(stagingManifest, null, 2)}\n`,
+      "utf8",
+    );
+    console.log(
+      `staged embedded manifest: ${manifestDestination} (${targets.size} targets, facade ${identity.facadeVersion}, fingerprint ${identity.contractFingerprint})`,
+    );
   }
 }
 
@@ -178,6 +263,11 @@ function resolveExtensionPlatformPackageDir(
   target: ReturnType<typeof resolveNativePackageTarget>,
   kind: ExtensionArtifactKind,
 ): string {
+  if (isEmbeddedExtensionArtifactKind(kind)) {
+    throw new Error(
+      `embedded extension kind ${kind} has no split per-platform package directory`,
+    );
+  }
   const directory =
     kind === "webview"
       ? target.webviewPackageDir
@@ -186,6 +276,51 @@ function resolveExtensionPlatformPackageDir(
     throw new Error(`target ${target.packageOs}-${target.arch} does not publish ${kind}`);
   }
   return directory;
+}
+
+/** Manifest paths are relative to the facade package root (consumer contract). */
+function embeddedFacadeRelativePath(
+  kind: ExtensionArtifactKind,
+  destination: string
+): string {
+  const facadeDir = embeddedFacadeDirForKind(kind);
+  const prefix = `${facadeDir}/`;
+  if (!destination.startsWith(prefix)) {
+    throw new Error(
+      `embedded ${kind} staging destination is not inside ${facadeDir}: ${destination}`,
+    );
+  }
+  return destination.slice(prefix.length);
+}
+
+async function readEmbeddedFacadeIdentity(
+  kind: ExtensionArtifactKind,
+  root: string
+): Promise<{
+  facadeVersion: string;
+  contractFingerprint: string;
+}> {
+  const facadeDir = embeddedFacadeDirForKind(kind);
+  const packageManifest: unknown = JSON.parse(
+    await readFile(join(root, facadeDir, "package.json"), "utf8"),
+  );
+  const contractManifest: unknown = JSON.parse(
+    await readFile(join(root, facadeDir, "contract.json"), "utf8"),
+  );
+  if (
+    !isRecord(packageManifest) ||
+    typeof packageManifest.version !== "string" ||
+    !isRecord(contractManifest) ||
+    typeof contractManifest.contractFingerprint !== "string"
+  ) {
+    throw new Error(
+      `invalid embedded ${kind} facade identity under ${facadeDir}`,
+    );
+  }
+  return {
+    facadeVersion: packageManifest.version,
+    contractFingerprint: contractManifest.contractFingerprint,
+  };
 }
 
 function isExtensionArtifactEvidence(value: unknown): value is ExtensionArtifactEvidence {
