@@ -30,6 +30,21 @@ export interface ClipboardCapability {
 v1 仅 UTF-8 文本。`writeText('')` 合法（写入空文本，等价语义上清空但保留所有权语义差异——
 darwin clearContents 与 setString("") 是两个操作；不合并）。
 
+**编码与边界契约（冻结）**：
+- 计量单位：**JS/TS 字符串的 UTF-16 码元数**（与 `String.length` 一致；win32 CF_UNICODETEXT
+  同单位）。容量上限冻结 **1 MiB = 1,048,576 UTF-16 码元**（writeText preflight 强制，超限 →
+  typed `clipboard_payload_too_large`，details: lengthUtf16, limit）；readText 返回值无上限
+  （读入信任本机剪贴板内容，深拷贝即返）。
+- 孤立代理对（lone surrogate）：输入含孤立高低代理（如 `"\uD83D"`）时，writeText 按
+  WTF-8/替换策略拒绝——**冻结：typed `clipboard_payload_invalid`**（details: reason:"lone-surrogate",
+  index），不做替换静默写入（替换会破坏读回往返一致性）。readText 遇到原生侧未终止 UTF-16
+  （理论上不可能——CF_UNICODETEXT 契约要求零终止；防御性截断至终止位并按实际字节返回，不报错）。
+- **NULL 语义区分（win32 冻结）**：`GetClipboardData(CF_UNICODETEXT) == NULL` 且
+  `GetLastError() == ERROR_SUCCESS/无ClipboardOwner 数据` → 剪贴板无文本 → 返回 **null**；
+  NULL 且 `GetLastError()` 为其他错误（如 ERROR_INVALID_HANDLE）→ typed
+  `clipboard_unavailable`（details 含 OS 错误码）。darwin：`string(forType:)` 返回 nil → null
+  （无歧义路径）。
+
 ## 2. 平台投影
 
 | 维度 | darwin | win32 |
@@ -37,7 +52,7 @@ darwin clearContents 与 setString("") 是两个操作；不合并）。
 | 写 | NSPasteboard.generalPasteboard().clearContents() + setString(forType:.string)，owner 线程 | OpenClipboard(NULL) + EmptyClipboard + SetClipboardData(CF_UNICODETEXT)（HGLOBAL 全局内存，UTF-16 零终止）+ CloseClipboard |
 | 读 | string(forType:.string)（nil → null） | OpenClipboard + GetClipboardData(CF_UNICODETEXT) → 深拷贝后立即 CloseClipboard |
 | 清 | clearContents() | OpenClipboard + EmptyClipboard + CloseClipboard |
-| 竞态 | AppKit 串行化 | **经典锁竞态**：OpenClipboard 可能 ACCESS_DENIED（他进程持有）。**冻结纪律**：有界重试——总预算 ≤2s，退避 10ms→20ms→…→200ms 封顶；预算耗尽 → typed `clipboard_locked`（details 含 attempts/elapsedMs） |
+| 竞态 | AppKit 串行化 | **经典锁竞态**：OpenClipboard 可能 ACCESS_DENIED（他进程持有）。**冻结纪律（可执行语义）**：以命令派发时刻为起点的 **monotonic deadline（Instant 基准）总预算 2000ms**；仅当 `OpenClipboard` 返回失败且 `GetLastError() == ERROR_ACCESS_DENIED` 时重试（其他错误即刻 typed `clipboard_unavailable`）；退避序列 10ms→20ms→40ms→80ms→160ms→200ms 封顶，其后恒 200ms；**每次 sleep 裁剪至剩余预算**（不超时睡眠）；预算耗尽或下次重试已无可执行空间 → typed `clipboard_locked`（details: attempts（含首次尝试）、elapsedMs（含原生调用耗时，截止 typed 错误构建时刻）） |
 
 **所有权/延迟渲染不做**（v1）：不注册延迟供给回调；写入即交付字节。
 
@@ -46,8 +61,21 @@ darwin clearContents 与 setString("") 是两个操作；不合并）。
 embedded（同族）；`contract.json` =
 `{"extensionName":"clipboard","contractFingerprint":"opentray-ext-clipboard-contract-1"}`。
 
+**DTO（冻结 schema；@opentray/spec 与 opentray-spec 双侧同构 + exhaustive fixture）**：
+
+```ts
+export interface ClipboardBackendCapabilities {
+  platform: 'darwin' | 'win32';
+  textOnly: true;                    // v1 固定 true（格式清单 v2 扩展位）
+  maxWriteUtf16: 1_048_576;          // 平台无关契约常量
+  boundedOpenRetry: boolean;         // win32=true（锁竞态重试律）；darwin=false（AppKit 串行化）
+}
+```
+
 typed 错误码：`clipboard_platform_unsupported` / `clipboard_locked`（details: attempts,
-elapsedMs）/ `clipboard_unavailable`（原生 API 失败，details 含 OS 错误码）。
+elapsedMs）/ `clipboard_unavailable`（原生 API 失败，details 含 OS 错误码）/
+`clipboard_payload_too_large`（details: lengthUtf16, limit）/
+`clipboard_payload_invalid`（details: reason, index）。
 注意：`readText` 无文本返回 **null 非 typed 错误**（空态一等公民，与 picker cancel=null 同律）。
 
 ## 4. 线程与依赖
