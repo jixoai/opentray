@@ -63,14 +63,20 @@
 
 ## 6. Verification
 
-- [ ] 6.1 双平台真机验收：每方法冒烟；交错时间线取证（**同 session 多 tray/多 mount** + 跨 app 实例隔离；普通 set-menu/ext-command 交错完成）；四路 dismissal 一致性；断连/重复终帧/错 owner/旧 generation 竞态族；session close 撤销（payload=cancel 分支）；busy typed；suppression 回传；commandLink/expander 真机截证（win）。
+- [ ] 6.1 双平台真机验收
+  - 证据：darwin acceptance_probe 12/12 ×4 稳定（0ac1b21b + ESC P2 修复 594d2810——真实合成 ESC 击键经显式 cancelId 绑定关闭 alert；port 计账 13/13 唯一且集合相等；busy 同步 typed；会话关闭恰一次 cancel 终帧；deinit-with-live-modal 零提交）；Windows 真机 acceptance_probe_windows 10 PASS + 1 SKIPPED（7525bfb1→1c60d46c：消息对话框关闭全链、busy、交错 5/5、severity×3、suppression 降级、能力门控、STA 生命周期、port 计账 9/9/9、真机 join 证据）；picker 端到端在本机受主机特有 shell 托管执行故障阻断（comdlg32 固定偏移、与关闭向量无关、PowerShell WinForms 与 5 个最小 Rust 复现同机存活——平台发现非产品缺陷），关闭机制已重构为 owner 线程 EnumThreadWindows+WM_CLOSE（baceb930，IFileDialog::Close 与 COM 指针删除、3 项 seam 测试、38/38）——picker 另机/Owner 桌面验证列入发布后清单。：每方法冒烟；交错时间线取证（**同 session 多 tray/多 mount** + 跨 app 实例隔离；普通 set-menu/ext-command 交错完成）；四路 dismissal 一致性；断连/重复终帧/错 owner/旧 generation 竞态族；session close 撤销（payload=cancel 分支）；busy typed；suppression 回传；commandLink/expander 真机截证（win）。
 - [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI + vision validate + **check 绿（含 self-review 产物）** + **一致性门绿（已预接线：package.json `verify:spec-consistency` 挂入 `verify` 聚合器 + verify-native-artifacts CI step；语义冲突 fixture 测试为批次 A 任务 2.6b）**；clean checkout release 预演（真实 pack+解包）逐目标 identity check。
 - [ ] 6.2b 一致性门 fixture 测试（**三臂已落地**：`scripts/openspec/check-ext-dialog-sound-consistency.test.ts` 4 用例——合法负面引用放行 / 伪装 marker 的语义冲突命中 / 每 ruleId 触发断言；随实现演进保持同步）。
-- [ ] 6.3 self-review（md+html）+ check ok:true；Codex 复核轮（R3+）至 GO。
+- [ ] 6.3 self-review
+  - 证据：a66b1dc4 self-review.md+html 升级实现阶段（三批评分台账 + 闭合发现清单）。（md+html）+ check ok:true；Codex 复核轮（R3+）至 GO。
 
 ## 7. Release
 
-- [ ] 7.1 AGENTS.md：Monorepo Law += 包体积门（已在工作树预落）；新章 Dialog Extension Law（design-reference §9 三条提炼，含 DeferredOperation 法则）。
-- [ ] 7.1b 同步 `.agents/skills/develop-opentray-ext`：「one fat cross-platform native package」按体积门裁决修订。
-- [ ] 7.2 skills/opentray 公共消费文档 + packages/ext-dialog/README。
-- [ ] 7.3 changeset（minor）→ 合并 main → version → push → CI 全绿 → npm 上线（与 add-ext-sound 同波）。
+- [ ] 7.1 AGENTS.md
+  - 证据：8e3ac5e8 Dialog And Sound Extension Law 定稿（临时标记移除；含注册表 oracle/filters 空数组/pin BlockUnload/pack 回执锚点/泛化 embedded 管线）。：Monorepo Law += 包体积门（已在工作树预落）；新章 Dialog Extension Law（design-reference §9 三条提炼，含 DeferredOperation 法则）。
+- [ ] 7.1b
+  - 证据：8e3ac5e8/46f07da8 develop-opentray-ext embedded kind 一等路径。 同步 `.agents/skills/develop-opentray-ext`：「one fat cross-platform native package」按体积门裁决修订。
+- [ ] 7.2 skills/opentray
+  - 证据：46f07da8 skills/opentray SKILL 路由 + references/ext-dialog.md + ext-sound.md + 双包 README API 契约。 公共消费文档 + packages/ext-dialog/README。
+- [ ] 7.3 changeset
+  - 证据：9e8fe5b7 minor changeset（fixed 家族 0.28.0→0.29.0 同波）。（minor）→ 合并 main → version → push → CI 全绿 → npm 上线（与 add-ext-sound 同波）。

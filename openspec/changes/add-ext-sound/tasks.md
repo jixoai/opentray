@@ -8,7 +8,8 @@
 
 ## 1. Alignment
 
-- [ ] 1.1 plan 索引与 design-reference 一致；validate 通过；add-ext-dialog 批次 A（embedded artifact kind + check-pack-size + deferred envelope）已落地并测试绿为前置——**CI 硬依赖门（R5 P1-6）**：sound 的 native/facade CI 作业以 dialog 批次 A 产物绿为条件（needs/路径门），不靠文档排序。
+- [ ] 1.1 plan 索引与 design-reference 一致；validate 通过
+  - 证据：vision validate add-ext-sound ok（2026-09-18）；dialog 批次 A 基线早已绿且 CI 接线经批次 D/泛化 embedded-packages 管线实证（CI runs 35225263870/35234464270/35237215398/35238822528 全绿）。；add-ext-dialog 批次 A（embedded artifact kind + check-pack-size + deferred envelope）已落地并测试绿为前置——**CI 硬依赖门（R5 P1-6）**：sound 的 native/facade CI 作业以 dialog 批次 A 产物绿为条件（needs/路径门），不靠文档排序。
 
 ## 2. BDD Contract
 
@@ -46,7 +47,11 @@
 
 ## 7. Release
 
-- [ ] 7.1 AGENTS.md：Sound Extension Law 提炼落档（fire-and-forget、冻结三通用名目录、PlaybackToken 所有权门控、WAV 内容校验、session 集合停止）。
-- [ ] 7.2 skills/opentray 公共消费文档 + packages/ext-sound/README。
-- [ ] 7.3 self-review（md+html）+ check ok:true + Codex 复核至 GO（R1 P1-7 补项）。
-- [ ] 7.4 changeset（minor）→ 与 add-ext-dialog 同波发布。
+- [ ] 7.1 AGENTS.md
+  - 证据：8e3ac5e8 Sound Extension Law 章（fire-and-forget、冻结三通用名、PlaybackToken 所有权门控、WAV 内容校验、session 集合停止 + 注册表 oracle 法则 + 有界两遍读）。：Sound Extension Law 提炼落档（fire-and-forget、冻结三通用名目录、PlaybackToken 所有权门控、WAV 内容校验、session 集合停止）。
+- [ ] 7.2 skills/opentray
+  - 证据：46f07da8 references/ext-sound.md + packages/ext-sound/README。 公共消费文档 + packages/ext-sound/README。
+- [ ] 7.3 self-review
+  - 证据：a66b1dc4 + 复核轮 .agents/review/2026-09-18-ext-sound-impl-r1.md R1 7.6→R3 9.2/10 集成 GO（双 P1 + 峰值残留全闭合，含 dialog 同族 getBackend 缺陷连带修复）。（md+html）+ check ok:true + Codex 复核至 GO（R1 P1-7 补项）。
+- [ ] 7.4 changeset
+  - 证据：9e8fe5b7 与 add-ext-dialog 同波。（minor）→ 与 add-ext-dialog 同波发布。
