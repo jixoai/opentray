@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use opentray_spec::{
     AppId, CommandScope, ExpectedExtensionIdentity, ExtensionEnvelope, ExtensionScope, Rect,
+    EXT_POLL_NO_DEADLINE_MS,
 };
 use serde_json::Value;
 
@@ -63,7 +64,16 @@ pub enum ExtensionCommandOutcome {
     Deferred(IssuedOperation),
 }
 
-pub trait ExtensionInstance: Send {
+/// Extension instances are OWNER-THREAD AFFINE: the blanket `Send` bound was
+/// removed (add-ext-dialog design section 5.3 thread contract, batch B
+/// ruling 2026-09-17). Native instances may hold UI-affine state (AppKit
+/// modal sessions, COM apartments); the registry keeps them on the thread
+/// that loaded them and the compiler now proves they never cross threads —
+/// a host that genuinely must move an instance owns an explicit `unsafe`
+/// Send proof at its own boundary, never here. Cross-thread work belongs to
+/// copyable request data and host-owned thread-safe channels (the deferred
+/// port), which is the dialog extension's worker model.
+pub trait ExtensionInstance {
     fn name(&self) -> &str;
     /// `issued` carries the broker-issued operation identity for this call.
     /// Native V2 instances receive `issued.handle` through the seeded
@@ -80,6 +90,18 @@ pub trait ExtensionInstance: Send {
         session_id: &str,
         host: &mut dyn ExtensionHostContext,
     ) -> Result<Vec<ExtensionEnvelope>, ExtensionError>;
+
+    /// Steps one deferred operation's native owner once on the CALLER's
+    /// thread (add-ext-dialog design section 5.2 broker-owned scheduler).
+    /// Returns the next relative deadline in milliseconds
+    /// ([`EXT_POLL_NO_DEADLINE_MS`] = nothing scheduled; the broker stops
+    /// polling this operation). A poll never carries a terminal: the
+    /// deferred port stays the single terminal channel. The default is a
+    /// non-producer instance — it is never scheduled by the broker loop and
+    /// answers no-deadline if asked.
+    fn poll_operation(&mut self, _operation_handle: u64) -> u64 {
+        EXT_POLL_NO_DEADLINE_MS
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -224,6 +246,21 @@ impl ExtensionRegistry {
         }
         Ok(events)
     }
+
+    /// Routes one broker-owned poll step to the named instance's producer
+    /// (add-ext-dialog design section 5.2). `None` means no live instance
+    /// owns that name (unloaded or never loaded): the caller drops the
+    /// schedule entry instead of stepping anything.
+    pub fn poll_operation(
+        &mut self,
+        app_id: &str,
+        ext: &str,
+        operation_handle: u64,
+    ) -> Option<u64> {
+        self.instances
+            .get_mut(&(app_id.to_string(), ext.to_string()))
+            .map(|instance| instance.poll_operation(operation_handle))
+    }
 }
 
 #[derive(Default)]
@@ -276,5 +313,85 @@ impl ExtensionInstance for RecordingExtension {
             command_scope: None,
             data: serde_json::json!({ "type": "sessionClosed", "sessionId": session_id }),
         }])
+    }
+}
+
+#[cfg(test)]
+mod poll_operation_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A producer instance whose poll answer depends on the handle (the
+    /// macOS dialog model: a live modal answers its cadence, anything else
+    /// no-deadline).
+    struct CountingPollProducer {
+        steps: Arc<AtomicUsize>,
+    }
+
+    impl ExtensionInstance for CountingPollProducer {
+        fn name(&self) -> &str {
+            "poller"
+        }
+
+        fn command(
+            &mut self,
+            _envelope: ExtensionEnvelope,
+            _issued: IssuedOperation,
+            _host: &mut dyn ExtensionHostContext,
+        ) -> Result<ExtensionCommandDisposition, ExtensionError> {
+            Ok(ExtensionCommandDisposition::Immediate(Vec::new()))
+        }
+
+        fn session_closed(
+            &mut self,
+            _session_id: &str,
+            _host: &mut dyn ExtensionHostContext,
+        ) -> Result<Vec<ExtensionEnvelope>, ExtensionError> {
+            Ok(Vec::new())
+        }
+
+        fn poll_operation(&mut self, operation_handle: u64) -> u64 {
+            self.steps.fetch_add(1, Ordering::SeqCst);
+            if operation_handle == 7 {
+                16
+            } else {
+                EXT_POLL_NO_DEADLINE_MS
+            }
+        }
+    }
+
+    /// The registry routes broker-owned poll steps to the named producer,
+    /// the trait default answers no-deadline for non-producers, and an
+    /// unknown instance name yields `None` (the caller drops the schedule
+    /// entry instead of stepping anything).
+    #[test]
+    fn registry_routes_poll_steps_and_the_default_is_no_deadline() {
+        let steps = Arc::new(AtomicUsize::new(0));
+        let mut registry = ExtensionRegistry::default();
+        registry.register(
+            "app-1".to_string(),
+            Box::new(CountingPollProducer {
+                steps: steps.clone(),
+            }),
+        );
+        registry.register(
+            "app-1".to_string(),
+            Box::new(RecordingExtension::new("plain")),
+        );
+
+        assert_eq!(registry.poll_operation("app-1", "poller", 7), Some(16));
+        assert_eq!(
+            registry.poll_operation("app-1", "poller", 9),
+            Some(EXT_POLL_NO_DEADLINE_MS),
+            "a finished/unknown modal honestly answers no-deadline"
+        );
+        assert_eq!(
+            registry.poll_operation("app-1", "plain", 7),
+            Some(EXT_POLL_NO_DEADLINE_MS),
+            "the non-producer default retires the entry after one step"
+        );
+        assert_eq!(registry.poll_operation("app-1", "missing", 7), None);
+        assert_eq!(steps.load(Ordering::SeqCst), 2);
     }
 }

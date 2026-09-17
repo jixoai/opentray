@@ -143,6 +143,14 @@ impl<B: AppBackend, L: ExtensionLoader> BrokerKernel<B, L> {
         self.kernel.backend()
     }
 
+    /// Mutable access to the extension registry (add-ext-dialog design
+    /// section 5.2): the owner loop routes broker-owned poll steps to the
+    /// loaded instances through this seam. Instances stay owner-thread
+    /// affine (the `ExtensionInstance` trait carries no `Send` bound).
+    pub fn extensions_mut(&mut self) -> &mut crate::ExtensionRegistry {
+        self.kernel.extensions_mut()
+    }
+
     /// The shared deferred-operation registry: the composition layer's
     /// deferred ports validate and settle handles through it.
     pub fn operations(&self) -> &std::sync::Arc<DeferredOperationRegistry> {
