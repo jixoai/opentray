@@ -142,6 +142,11 @@ pub(crate) fn is_busy(scope: &CommandScope) -> bool {
 }
 
 /// The active worker count (diagnostics + tests).
+///
+/// Kept as a diagnostic surface even where no production path calls it
+/// today (the registry introspection the shutdown report and future probes
+/// build on).
+#[allow(dead_code)]
 pub(crate) fn active_workers() -> usize {
     lock_registry().iter().flatten().count()
 }
@@ -432,11 +437,16 @@ fn wait_for_slot_release(ordinal: usize, budget: Duration) {
     }
 }
 
-/// Session-close revocation (design section 5.4): mark the worker revoked
-/// (the cancel branch wins over any in-flight natural outcome) and project
-/// the native dismissal through the WM_APP dispatcher. The worker submits
-/// the cancel-branch terminal itself; the host's delivery decision (the
-/// port was revoked before this call) stays authoritative.
+/// Session-close revocation (design section 5.4), single-native form: mark
+/// the worker revoked (the cancel branch wins over any in-flight natural
+/// outcome) and project the native dismissal through the WM_APP dispatcher.
+/// The worker submits the cancel-branch terminal itself; the host's
+/// delivery decision (the port was revoked before this call) stays
+/// authoritative. The lib.rs composition never holds a `NativeModal` (no
+/// registration on win32), so this seam is intentionally uncalled today —
+/// session close goes through [`revoke_session`] and natural completion
+/// goes through the worker itself.
+#[allow(dead_code)]
 pub(crate) fn revoke(native: NativeModal) {
     let NativeModal { shared } = native;
     shared.revoked.store(true, Ordering::Release);
@@ -462,7 +472,10 @@ pub(crate) fn revoke_session(session_id: &str) {
 
 /// Orphaned-native teardown for the instance Drop path: the host is going
 /// away (deinit), so no terminal is submitted — the port is revoked by the
-/// host before deinit anyway.
+/// host before deinit anyway. Uncalled today for the same reason as
+/// [`revoke`]: nothing registers a native on win32, and deinit goes
+/// through [`shutdown`].
+#[allow(dead_code)]
 pub(crate) fn teardown_orphaned(native: NativeModal) {
     let NativeModal { shared } = native;
     shared.abandoned.store(true, Ordering::Release);

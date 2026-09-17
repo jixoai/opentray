@@ -30,12 +30,15 @@ mod state;
 #[cfg(target_os = "macos")]
 mod macos;
 
+#[cfg(target_os = "windows")]
+mod windows;
+
 use std::ffi::{c_char, c_void, CString};
 
 use opentray_spec::{
-    ExtBytes, ExtCommandDispositionV1, ExtContext, ExtDeferredPortV1, ExtHostContext,
-    ExtOperationPayload, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope, TypedExtensionError,
-    EXT_ABI_VERSION, EXT_ERR_REJECTED,
+    CommandScope, ExtBytes, ExtCommandDispositionV1, ExtContext, ExtDeferredPortV1,
+    ExtHostContext, ExtOperationPayload, ExtOwnedBytes, ExtResultCode, ExtensionEnvelope,
+    TypedExtensionError, EXT_ABI_VERSION, EXT_ERR_REJECTED,
     EXT_ERR_UNSUPPORTED, EXT_OK,
 };
 
@@ -44,56 +47,22 @@ use state::NativeState;
 use state::{DialogInstance, ModalKind};
 
 // ---------------------------------------------------------------------------
-// Frozen poll ABI (design section 5.7 ruling 3): the broker-owned modal
-// scheduler calls this optional producer symbol; the outcome never carries
-// a terminal — submit is the only terminal channel.
+// Frozen poll ABI (design section 5.7 ruling 3): opentray-spec owns the
+// frozen symbol name, outcome struct, and status/deadline constants (the
+// broker consumer resolves the same types without depending on this
+// crate); this crate re-exports them so its public surface stays unchanged.
+// The producer-side step cadence stays here (extension policy, not ABI).
 // ---------------------------------------------------------------------------
 
-/// The frozen producer symbol name (batch B macOS side).
-pub const EXT_SYMBOL_POLL_OWNER_V1: &str = "opentray_ext_poll_owner_v1";
-
-/// `ExtPollOutcomeV1::status`: the only frozen status — the operation is
-/// pending and its terminal (if any) went through the deferred port.
-pub const EXT_POLL_STATUS_PENDING: u32 = 0;
-
-/// `ExtPollOutcomeV1::next_deadline_ms` sentinel: nothing scheduled; the
-/// loop should not arm a timer for this owner.
-pub const EXT_POLL_NO_DEADLINE_MS: u64 = u64::MAX;
+pub use opentray_spec::{
+    ExtPollOutcomeV1, EXT_POLL_NO_DEADLINE_MS, EXT_POLL_OUTCOME_FLAG_TERMINAL_QUEUED,
+    EXT_POLL_STATUS_PENDING, EXT_SYMBOL_POLL_OWNER_V1,
+};
 
 /// Modal stepping cadence while a session is active: one step per owner
 /// loop iteration at UI-frame granularity (the frozen quota bounds the
 /// per-iteration work).
 pub const EXT_POLL_STEP_INTERVAL_MS: u64 = 16;
-
-/// `ExtPollOutcomeV1::wake_flags` bit: this poll completed a modal and
-/// submitted its terminal through the deferred port (the port wake already
-/// requested a drain; the flag is a diagnostic hint for the scheduler).
-pub const EXT_POLL_OUTCOME_FLAG_TERMINAL_QUEUED: u32 = 1 << 0;
-
-/// Frozen `#[repr(C)]` poll outcome (design section 5.7): `status` and
-/// `reserved` are leading u32s, `next_deadline_ms` is a relative
-/// millisecond duration from the poll call (u64::MAX = none), and
-/// `wake_flags` carries hint bits. Any drift is an ABI break requiring a
-/// new versioned struct.
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct ExtPollOutcomeV1 {
-    pub status: u32,
-    pub reserved: u32,
-    pub next_deadline_ms: u64,
-    pub wake_flags: u32,
-}
-
-impl ExtPollOutcomeV1 {
-    pub fn pending(next_deadline_ms: u64, wake_flags: u32) -> Self {
-        Self {
-            status: EXT_POLL_STATUS_PENDING,
-            reserved: 0,
-            next_deadline_ms,
-            wake_flags,
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Required ABI-3 symbols
@@ -182,11 +151,35 @@ pub unsafe extern "C" fn opentray_ext_session_closed(
         extension.remove_modal(handle);
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        // win32 (design section 5.4): the modal table holds no records on
+        // this platform (workers self-release their slots), so revocation
+        // projects through the worker registry instead — every worker keyed
+        // to the closing session is revoked and submits its own
+        // cancel-branch terminal from its own thread.
+        windows::revoke_session(session_id);
+    }
+
     write_owned_json(out_events_json, "[]")
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn opentray_ext_deinit(instance: *mut c_void) {
+    #[cfg(target_os = "windows")]
+    {
+        // win32 unload-race ruling (design section 5.3): close-all + the
+        // bounded 2s join happen BEFORE the instance Drop below can reach
+        // FreeLibrary. A worker that outlives the join keeps running with
+        // this module pinned; shutdown() reports the fatal diagnostic.
+        let report = windows::shutdown();
+        if report.joined + report.leaked > 0 {
+            eprintln!(
+                "opentray-ext-dialog: deinit joined {} dialog worker(s), leaked {}",
+                report.joined, report.leaked
+            );
+        }
+    }
     if !instance.is_null() {
         drop(unsafe { Box::from_raw(instance.cast::<DialogInstance>()) });
     }
@@ -310,13 +303,6 @@ pub unsafe extern "C" fn opentray_ext_command_v2(
             if let Err(error) = state::validate_show_command(&show) {
                 return zero_disposition_then_typed(out_disposition, EXT_ERR_REJECTED, &error);
             }
-            if extension.is_busy(&scope) {
-                let label = ModalKind::from_command(&show)
-                    .map(|kind| kind.label())
-                    .unwrap_or("show");
-                let error = state::busy_error(&scope, label);
-                return zero_disposition_then_typed(out_disposition, EXT_ERR_REJECTED, &error);
-            }
             let Some(kind) = ModalKind::from_command(&show) else {
                 return zero_disposition_then(
                     out_disposition,
@@ -340,18 +326,15 @@ pub unsafe extern "C" fn opentray_ext_command_v2(
                     ),
                 );
             }
-            match platform_begin(&kind) {
-                Ok(native) => {
-                    extension.register_modal(handle, scope, kind, native);
-                    // Disposition stays exactly as the host seeded it
-                    // (Deferred + the issued handle): the pre-Accept
-                    // failure window is closed.
-                    EXT_OK
-                }
+            match platform_show(extension, kind, &scope, handle) {
+                // Disposition stays exactly as the host seeded it
+                // (Deferred + the issued handle): the pre-Accept failure
+                // window is closed.
+                Ok(()) => EXT_OK,
+                // Pre-Accept failure transaction: no Accepted frame,
+                // no terminal; the host retires the operation on this
+                // error path.
                 Err(error) => {
-                    // Pre-Accept failure transaction: no Accepted frame,
-                    // no terminal; the host retires the operation on this
-                    // error path.
                     zero_disposition_then_typed(out_disposition, EXT_ERR_REJECTED, &error)
                 }
             }
@@ -397,7 +380,92 @@ pub unsafe extern "C" fn opentray_ext_poll_owner_v1(
     if instance.is_null() {
         return ExtPollOutcomeV1::pending(EXT_POLL_NO_DEADLINE_MS, 0);
     }
-    let extension = unsafe { &mut *instance.cast::<DialogInstance>() };
+    #[cfg(target_os = "macos")]
+    {
+        let extension = unsafe { &mut *instance.cast::<DialogInstance>() };
+        step_registered_modal(extension, operation_handle)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // win32 (design section 5.3): dialog completion lives on bounded
+        // STA worker threads and the modal registry never holds a record on
+        // this platform, so every poll honestly reports "nothing
+        // scheduled" — the broker retires the entry after one step.
+        let _ = operation_handle;
+        ExtPollOutcomeV1::pending(EXT_POLL_NO_DEADLINE_MS, 0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Platform seams (the windows half of each seam is documented at the top of
+// `src/windows/mod.rs`)
+// ---------------------------------------------------------------------------
+
+/// macOS show path: the instance busy table is the busy authority and the
+/// native modal registers into `DialogInstance` (the owner loop steps it
+/// through `poll_owner`).
+#[cfg(target_os = "macos")]
+fn platform_show(
+    extension: &mut DialogInstance,
+    kind: ModalKind,
+    scope: &CommandScope,
+    handle: u64,
+) -> Result<(), TypedExtensionError> {
+    if extension.is_busy(scope) {
+        return Err(state::busy_error(scope, kind.label()));
+    }
+    let native = macos::begin(&kind)?;
+    extension.register_modal(handle, scope.clone(), kind, NativeState::Macos(native));
+    Ok(())
+}
+
+/// win32 show path (design section 5.3): the bounded STA worker registry
+/// owns the busy view, `begin` performs the pre-Accept transaction (spawn +
+/// entry evidence within the frozen 3s budget), and NOTHING registers into
+/// `DialogInstance` — workers self-release their slots and submit their own
+/// terminals from their own threads.
+#[cfg(target_os = "windows")]
+fn platform_show(
+    extension: &mut DialogInstance,
+    kind: ModalKind,
+    scope: &CommandScope,
+    handle: u64,
+) -> Result<(), TypedExtensionError> {
+    if windows::is_busy(scope) {
+        return Err(state::busy_error(scope, kind.label()));
+    }
+    let _native = windows::begin(&kind, extension.port.as_ref(), handle, scope)?;
+    // The Ok native control block is intentionally dropped: its Arc lives
+    // in the worker registry and the worker is the single release
+    // authority (the slot ownership law).
+    Ok(())
+}
+
+/// Other platforms: no native dialog surface yet.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn platform_show(
+    _extension: &mut DialogInstance,
+    kind: ModalKind,
+    _scope: &CommandScope,
+    _handle: u64,
+) -> Result<(), TypedExtensionError> {
+    let _ = kind;
+    Err(state::typed_error(
+        options::error_code::PLATFORM_UNSUPPORTED,
+        "this platform has no native dialog surface yet",
+    ))
+}
+
+/// One `poll_owner` step of a registered modal (macOS only — the registry
+/// holds records exclusively on this platform). Continue keeps the frozen
+/// UI-frame cadence; Ended extracts the terminal while the panel is alive,
+/// tears the session down, then submits the one terminal through the port
+/// (the only terminal channel).
+#[cfg(target_os = "macos")]
+fn step_registered_modal(
+    extension: &mut DialogInstance,
+    operation_handle: u64,
+) -> ExtPollOutcomeV1 {
     let Some(modal) = extension.find_modal_mut(operation_handle) else {
         // Unknown/finished handle: nothing scheduled for this owner.
         return ExtPollOutcomeV1::pending(EXT_POLL_NO_DEADLINE_MS, 0);
@@ -405,36 +473,32 @@ pub unsafe extern "C" fn opentray_ext_poll_owner_v1(
     let Some(native) = modal.native.as_mut() else {
         return ExtPollOutcomeV1::pending(EXT_POLL_NO_DEADLINE_MS, 0);
     };
-
-    match platform_step(&mut *native) {
-        Ok(step_outcome) => match step_outcome {
-            #[cfg(target_os = "macos")]
-            macos::ModalStep::Continue => {
-                ExtPollOutcomeV1::pending(EXT_POLL_STEP_INTERVAL_MS, 0)
+    let NativeState::Macos(ref mut inner) = *native;
+    match macos::step(inner) {
+        Ok(macos::ModalStep::Continue) => {
+            ExtPollOutcomeV1::pending(EXT_POLL_STEP_INTERVAL_MS, 0)
+        }
+        Ok(macos::ModalStep::Ended(code)) => {
+            // Natural completion: extract while the panel is alive, tear
+            // the session down, then submit the one terminal through the
+            // port (the only terminal channel).
+            let payload = {
+                let NativeState::Macos(ref inner) = *native;
+                macos::extract_terminal(inner, &modal.kind, code)
+            };
+            let native = extension
+                .take_native(operation_handle)
+                .expect("native was present for the stepping modal");
+            match native {
+                NativeState::Macos(inner) => macos::finish(inner),
             }
-            #[cfg(target_os = "macos")]
-            macos::ModalStep::Ended(code) => {
-                // Natural completion: extract while the panel is alive,
-                // tear the session down, then submit the one terminal
-                // through the port (the only terminal channel).
-                let payload = {
-                    let NativeState::Macos(ref inner) = *native;
-                    macos::extract_terminal(inner, &modal.kind, code)
-                };
-                let native = extension
-                    .take_native(operation_handle)
-                    .expect("native was present for the stepping modal");
-                match native {
-                    NativeState::Macos(inner) => macos::finish(inner),
-                }
-                extension.remove_modal(operation_handle);
-                submit_terminal_ignoring_host_decision(extension, operation_handle, &payload);
-                ExtPollOutcomeV1::pending(
-                    EXT_POLL_NO_DEADLINE_MS,
-                    EXT_POLL_OUTCOME_FLAG_TERMINAL_QUEUED,
-                )
-            }
-        },
+            extension.remove_modal(operation_handle);
+            submit_terminal_ignoring_host_decision(extension, operation_handle, &payload);
+            ExtPollOutcomeV1::pending(
+                EXT_POLL_NO_DEADLINE_MS,
+                EXT_POLL_OUTCOME_FLAG_TERMINAL_QUEUED,
+            )
+        }
         Err(error) => {
             // A step can only fail off the main thread (a host contract
             // violation): diagnose and stop polling this owner rather than
@@ -448,48 +512,20 @@ pub unsafe extern "C" fn opentray_ext_poll_owner_v1(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Platform seams
-// ---------------------------------------------------------------------------
-
-#[cfg(target_os = "macos")]
-fn platform_begin(kind: &ModalKind) -> Result<NativeState, TypedExtensionError> {
-    Ok(NativeState::Macos(macos::begin(kind)?))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn platform_begin(_kind: &ModalKind) -> Result<NativeState, TypedExtensionError> {
-    Err(state::typed_error(
-        options::error_code::PLATFORM_UNSUPPORTED,
-        "this platform has no native dialog surface yet",
-    ))
-}
-
-#[cfg(target_os = "macos")]
-fn platform_step(native: &mut NativeState) -> Result<macos::ModalStep, TypedExtensionError> {
-    let NativeState::Macos(inner) = native;
-    macos::step(inner)
-}
-
-/// Non-macOS step outcome placeholder (uninhabited: no native surface
-/// exists to step, so the `Ok` arm is an empty exhaustive match).
-#[cfg(not(target_os = "macos"))]
-pub(crate) enum ModalStepShim {}
-
-#[cfg(not(target_os = "macos"))]
-fn platform_step(_native: &mut NativeState) -> Result<ModalStepShim, TypedExtensionError> {
-    Err(state::typed_error(
-        options::error_code::PLATFORM_UNSUPPORTED,
-        "this platform has no native dialog surface yet",
-    ))
-}
-
 #[cfg(target_os = "macos")]
 fn backend_capabilities() -> Result<options::DialogBackendCapabilities, TypedExtensionError> {
     Ok(options::DialogBackendCapabilities::darwin())
 }
 
-#[cfg(not(target_os = "macos"))]
+/// win32 DTO projection (design section 7): the comctl32 v6 probe owns
+/// `taskDialog`/`commandLinks`/`expander` (the broker RT_MANIFEST supplies
+/// the activation context).
+#[cfg(target_os = "windows")]
+fn backend_capabilities() -> Result<options::DialogBackendCapabilities, TypedExtensionError> {
+    Ok(windows::backend_capabilities())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn backend_capabilities() -> Result<options::DialogBackendCapabilities, TypedExtensionError> {
     Err(state::typed_error(
         options::error_code::PLATFORM_UNSUPPORTED,

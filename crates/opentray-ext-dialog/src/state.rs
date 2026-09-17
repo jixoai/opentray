@@ -95,6 +95,7 @@ impl DeferredPortCopy {
     /// law keeps only `port_data` + `submit`, both broker-owned
     /// process-lifetime state, so the clone is the same honest pair. The
     /// sender wraps it in the windows module's Send shim.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) fn clone_pair(&self) -> DeferredPortCopy {
         DeferredPortCopy {
             port_data: self.port_data,
@@ -186,6 +187,12 @@ impl DialogInstance {
 
     /// True when the scope already shows a dialog (typed busy law). Called
     /// BEFORE any state change so a rejection never mutates state.
+    ///
+    /// macOS-only in production (the win32 busy view lives in the worker
+    /// registry — see `windows::is_busy`); the platform-neutral busy law
+    /// stays exercised cross-platform through the test surface, hence the
+    /// conditional allowance for non-macOS lib builds.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn is_busy(&self, scope: &CommandScope) -> bool {
         self.modals
             .values()
@@ -195,6 +202,11 @@ impl DialogInstance {
     /// Reserves the scope and registers the active modal (single-threaded
     /// CAS: the caller checked `is_busy` immediately before, and both run
     /// on the owner thread with no interleaving).
+    ///
+    /// macOS-only in production: the win32 show path never registers
+    /// (workers self-release their slots; a DialogInstance record would
+    /// never be removed by the worker thread).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn register_modal(
         &mut self,
         handle: u64,
@@ -223,6 +235,10 @@ impl DialogInstance {
         self.modals.get(&handle)
     }
 
+    /// macOS-only in production: the win32 path never registers a modal,
+    /// so nothing on that platform steps (win32 polls honestly report
+    /// no-deadline instead).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn find_modal_mut(&mut self, handle: u64) -> Option<&mut ActiveModal> {
         self.modals.get_mut(&handle)
     }
