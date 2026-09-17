@@ -131,7 +131,7 @@ const abiShapedBackendEvent = (
   backend: SoundBackendCapabilities,
   requestId: RequestId
 ): ServerFrame => {
-  type BackendEvent = ReturnType<typeof backendEventResult>["events"][number];
+  type BackendEvent = Extract<ServerFrame, { type: "ext-command-result" }>["events"][number];
   const nativeJson = JSON.stringify({
     scope: { appId: "app-1", trayId: "tray-1", ext: MOUNT_ID },
     data: { type: "backend", backend },
