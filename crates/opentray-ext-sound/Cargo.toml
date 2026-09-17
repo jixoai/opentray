@@ -1,0 +1,44 @@
+[package]
+name = "opentray-ext-sound"
+description = "OpenTray native sound dynamic extension ABI provider."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+opentray-spec.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# macOS versions are aligned with opentray-ext-dialog's declarations
+# (objc2-app-kit 0.3.x / objc2 0.6.x / dispatch2 0.3.x). NSGraphics
+# supplies the free NSBeep(); NSSound supplies the player, its delegate
+# protocol, and the typed setDelegate binding.
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = "0.3.1"
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", features = [
+    "NSGraphics",
+    "NSSound",
+] }
+objc2-foundation = { version = "0.3.2", features = [
+    "NSObjCRuntime",
+    "NSObject",
+    "NSString",
+] }
+
+# Windows versions are aligned with opentray-ext-dialog's declarations
+# (windows-sys 0.61.x). winmm PlaySound and user32 MessageBeep are static
+# imports; no WinRT and no comctl surface.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_UI_WindowsAndMessaging",
+] }
