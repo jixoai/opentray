@@ -40,7 +40,8 @@
 
 ## 6. Verification
 
-- [ ] 6.1 双平台真机验收：三方法命令受理与错误分支语义验证（原生返回值/broker.log 取证，可闻性不作门）；通用名×3 + 双平台各一原生名 + 必 miss 名（details payload 断言）+ **NODEFAULT 无回退取证**；**PlaybackArbiter 竞态族**（两线程 swap/play 交错、alias-vs-file 交替、native false、close race；spy/wrapper 断言实际 SND_PURGE 与播放次序）；backend DTO 上报（getBackend）。
+- [x] 6.1 双平台真机验收：三方法命令受理与错误分支语义验证（原生返回值/broker.log 取证，可闻性不作门）；通用名×3 + 双平台各一原生名 + 必 miss 名（details payload 断言）+ **NODEFAULT 无回退取证**；**PlaybackArbiter 竞态族**（两线程 swap/play 交错、alias-vs-file 交替、native false、close race；spy/wrapper 断言实际 SND_PURGE 与播放次序）；backend DTO 上报（getBackend）。
+  - 证据：darwin（c80397b5，S-Rust probe 全矩阵）；Windows 真机 honor 主机 2026-09-17（commits 0574c601 probe win32 腿 + da37e8e3 注册表 oracle）：`cargo test -p opentray-ext-sound` 26/26；probe release 全矩阵——beep/common×3/native SystemHand/playSound(真实 C:\Windows\Media WAV) 全 [ok] immediate；**真机抓到并修复一个法则级缺陷**：winmm `PlaySoundW` 在 `SND_ALIAS|SND_NODEFAULT` 下对不存在 alias 返回非零（NODEFAULT 只抑制默认音、BOOL 仍报成功），native BOOL 不是 alias miss oracle——da37e8e3 增设 `HKCU\AppEvents\Schemes\Apps\.Default\<name>` 注册表目录预检：缺键 = typed `sound_not_found`（attempted 含 registry-scheme 阶段）+ **零 native 调用**（设计的拒绝路径 spy 法则），修复后必 miss 名 [err] 全载荷正确；PlaybackArbiter 竞态族 7 项确定性单测双平台通过（26/26 ×2）；getBackend DTO 由 lib 测试冻结双平台构造器 fixture 覆盖。
 - [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check；**真实 pack 证据**（共享 check-pack-size 脚本：真实 tgz stat/digest + 解包逐目标 identity，含 sha256/buildIdentity 断言）。
 
 ## 7. Release
