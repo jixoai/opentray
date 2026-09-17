@@ -10,7 +10,7 @@
 //    descriptor over the frozen four-target staging matrix.
 
 import { afterAll, describe, expect, it } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, open, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { realpath } from "node:fs/promises";
@@ -122,6 +122,26 @@ const backendEventResult = (
     },
   ],
 });
+
+/** ABI-shaped backend event: the exact immediate-event JSON the native
+ * crate emits for getBackend (sound review R1 P1 — the previous mocked
+ * shape masked a native/facade contract mismatch; this fixture pins the
+ * real one). */
+const abiShapedBackendEvent = (
+  backend: SoundBackendCapabilities,
+  requestId: RequestId
+): ServerFrame => {
+  type BackendEvent = ReturnType<typeof backendEventResult>["events"][number];
+  const nativeJson = JSON.stringify({
+    scope: { appId: "app-1", trayId: "tray-1", ext: MOUNT_ID },
+    data: { type: "backend", backend },
+  });
+  return {
+    type: "ext-command-result",
+    requestId,
+    events: [JSON.parse(nativeJson) as BackendEvent],
+  };
+};
 
 /** Exactly one deferred terminal — sound must never settle through this shape. */
 const terminalResult = (): ServerFrame => ({
@@ -408,7 +428,30 @@ describe("@opentray/ext-sound", () => {
     const first = await sound.getBackend();
     const second = await sound.getBackend();
 
-    expect(first).toBe(second);
+    expect(first).toBe(second);    expect(first).toBe(second);
+
+    // ABI boundary (sound review R1 P1): the facade must consume the exact
+    // immediate-event JSON the native crate emits — the mocked helper alone
+    // had masked a native/facade shape mismatch.
+    const abiTransport = new ScriptedTransport([
+      (frame) => abiShapedBackendEvent(WIN32_BACKEND, frame.requestId),
+    ]);
+    const abiSound = attachTestSound("win32", abiTransport);
+    await expect(abiSound.getBackend()).resolves.toEqual(WIN32_BACKEND);
+    const mismatchTransport = new ScriptedTransport([
+      (frame) =>
+        ({
+          ...backendEventResult(WIN32_BACKEND, frame.requestId),
+          events: [
+            {
+              scope: { appId: "app-1", trayId: "tray-1", ext: MOUNT_ID },
+              data: { type: "result", op: "getBackend", backend: WIN32_BACKEND },
+            },
+          ],
+        }) as ReturnType<typeof backendEventResult>,
+    ]);
+    const mismatchSound = attachTestSound("win32", mismatchTransport);
+    await expect(mismatchSound.getBackend()).rejects.toThrow();
     expect(Object.isFrozen(first)).toBe(true);
     expect(Object.isFrozen(first.fileFormats)).toBe(true);
     expect(first).toEqual(DARWIN_BACKEND);
@@ -539,6 +582,37 @@ describe("win32 WAV validator (pure byte fixtures)", () => {
     expect(WAV_MAX_BYTES).toBe(64 * 1024 * 1024);
     // All-zero bytes prove the size branch fires before the RIFF magic check.
     expect(validateWavBytes(Buffer.alloc(WAV_MAX_BYTES + 1))).toBe("size-cap");
+
+  });
+
+  // Bounded streamed read (sound review R1 P1 TOCTOU): the facade must
+  // reject an over-cap FILE through the open-once bounded loop — never a
+  // pre-read stat — and an exactly-cap file must flow through to byte
+  // validation (proving the loop does not cut the boundary short).
+  it("streams the win32 WAV cap from the file handle, not a pre-read stat", async () => {
+    const dir = await makeTempDir();
+    tempDirs.push(dir);
+    const oversized = join(dir, "oversized.wav");
+    const handle = await open(oversized, "w");
+    await handle.write(Buffer.alloc(WAV_MIN_BYTES)); // real bytes at the head
+    await handle.truncate(WAV_MAX_BYTES + 2); // sparse tail past the cap
+    await handle.close();
+    const transport = new ScriptedTransport();
+    const sound = attachTestSound("win32", transport);
+    await expect(sound.playSound(oversized)).rejects.toMatchObject({
+      code: SOUND_ERROR_CODES.formatUnsupported,
+      details: { kind: "format", reason: "size-cap" },
+    });
+    expect(transport.frames).toHaveLength(0);
+
+    const exactCap = join(dir, "exact-cap.wav");
+    const exactHandle = await open(exactCap, "w");
+    await exactHandle.write(Buffer.alloc(WAV_MAX_BYTES)); // exactly the cap, not a WAV
+    await exactHandle.close();
+    await expect(sound.playSound(exactCap)).rejects.toMatchObject({
+      code: SOUND_ERROR_CODES.formatUnsupported,
+      details: { kind: "format", reason: "riff-magic" },
+    });
   });
 
   it("rejects missing RIFF and WAVE magic (including disguised MP3 payloads)", () => {

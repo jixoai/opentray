@@ -324,6 +324,28 @@ describe("@opentray/ext-dialog", () => {
     });
   });
 
+  it("getBackend consumes the exact ABI-shaped event the native crate emits", async () => {
+    // Same-family fix as the sound review R1 P1: the native crate's
+    // immediate getBackend event is `data: { type: "backend", backend }`
+    // (ext-dialog lib.rs); this fixture round-trips that exact JSON so a
+    // future native/facade shape drift fails here instead of in production.
+    type BackendEvent = ReturnType<typeof backendEventResult>["events"][number];
+    const nativeJson = JSON.stringify({
+      scope: { appId: "app-1", trayId: "tray-1", ext: MOUNT_ID },
+      data: { type: "backend", backend: DARWIN_BACKEND },
+    });
+    const abiTransport = new ScriptedTransport([
+      (frame) =>
+        ({
+          type: "ext-command-result",
+          requestId: frame.requestId,
+          events: [JSON.parse(nativeJson) as BackendEvent],
+        }) as ReturnType<typeof backendEventResult>,
+    ]);
+    const dialog = attachTestDialog("darwin", abiTransport);
+    await expect(dialog.getBackend()).resolves.toEqual(DARWIN_BACKEND);
+  });
+
   it("getBackend also accepts a deferred terminal backend snapshot", async () => {
     const transport = new ScriptedTransport([() => terminalResult(WIN32_BACKEND)]);
     const dialog = attachTestDialog("win32", transport);
