@@ -487,6 +487,76 @@ pub(crate) fn worker_completion_transaction(
     WorkerCompletion::Submit(payload)
 }
 
+// ---------------------------------------------------------------------------
+// win32 unload-race settlement (design section 5.3, R4 P0-3): a worker
+// that has not exited must never have its library deinit'd or dlclose'd.
+// Host-compiled core with an injectable pin seam; windows/ wires the real
+// GetModuleHandleExW pin.
+// ---------------------------------------------------------------------------
+
+/// The frozen fatal diagnostic of the blocked unload path (asserted by the
+/// failure-injection regression test).
+pub(crate) const UNLOAD_BLOCKED_FATAL: &str = "dialog worker(s) outlived the join budget and the \
+     module self-pin failed; deinit blocks this thread forever and the library stays mapped \
+     (leak-by-design)";
+
+/// The two frozen endings plus the clean case:
+///
+/// - [`UnloadDecision::Clean`] — every worker joined inside the budget:
+///   the host may free the instance and unload the library.
+/// - [`UnloadDecision::Pinned`] — ending (a): workers outlived the join,
+///   but the module self-pin succeeded. The loader's reference count keeps
+///   executing code mapped, so the broker continues its exit flow and the
+///   cleanup lands at process exit.
+/// - [`UnloadDecision::BlockUnload`] — the pin FAILED with live workers:
+///   ending (a) is unavailable. `opentray_ext_deinit` must never return
+///   into the host's `FreeLibrary`/dlclose while a worker may still be
+///   executing this module's code — it blocks forever instead
+///   (leak-by-design: the library stays loaded, the workers finish
+///   naturally, process exit reclaims everything).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UnloadDecision {
+    Clean,
+    Pinned,
+    BlockUnload { fatal: &'static str },
+}
+
+/// One shutdown settlement (the win32 deinit seam's report).
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) struct ShutdownSettlement {
+    pub(crate) joined: usize,
+    pub(crate) leaked: usize,
+    pub(crate) pinned: bool,
+    pub(crate) unload: UnloadDecision,
+}
+
+/// Settles the close-all + bounded-join phase of deinit. `pin` is the
+/// native self-pin seam (production: `GetModuleHandleExW` pin of this
+/// module; tests inject failures); it is consulted ONLY when a worker
+/// outlived the join budget.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn settle_shutdown<F>(joined: usize, leaked: usize, pin: F) -> ShutdownSettlement
+where
+    F: FnOnce() -> bool,
+{
+    let pinned = leaked > 0 && pin();
+    let unload = if leaked == 0 {
+        UnloadDecision::Clean
+    } else if pinned {
+        UnloadDecision::Pinned
+    } else {
+        UnloadDecision::BlockUnload {
+            fatal: UNLOAD_BLOCKED_FATAL,
+        }
+    };
+    ShutdownSettlement {
+        joined,
+        leaked,
+        pinned,
+        unload,
+    }
+}
+
 /// Canonicalizes a confirmed existing selection (file/directory pickers):
 /// the absolute realpath when the path exists; the lexical absolute form
 /// when the file vanished between confirmation and canonicalization.
@@ -800,6 +870,60 @@ pub(crate) mod tests {
             }
             other => panic!("revocation settles through the cancel branch: {other:?}"),
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // win32 unload-race settlement (design section 5.3, R4 P0-3): a worker
+    // that has not exited must never have its library deinit'd/dlclosed.
+    // The pin is the injected seam — production wires the
+    // GetModuleHandleExW self-pin; these tests inject its failure.
+    // -------------------------------------------------------------------------
+
+    /// P1 regression (failure injection: the pin seam returns failure):
+    /// workers outlived the join budget AND the module self-pin failed —
+    /// the settlement must BLOCK the unload path (deinit never returns
+    /// into the host's FreeLibrary/dlclose) and record the fatal
+    /// diagnostic.
+    #[test]
+    fn failed_pin_with_leaked_workers_blocks_the_unload_path() {
+        let settlement = settle_shutdown(0, 2, || false);
+        assert_eq!(settlement.joined, 0);
+        assert_eq!(settlement.leaked, 2);
+        assert!(!settlement.pinned);
+        match settlement.unload {
+            UnloadDecision::BlockUnload { fatal } => {
+                assert_eq!(fatal, UNLOAD_BLOCKED_FATAL);
+                assert!(
+                    fatal.contains("pin failed") && fatal.contains("blocks"),
+                    "the abandoned unload path is recorded: {fatal}"
+                );
+            }
+            other => panic!("a failed pin must block the unload: {other:?}"),
+        }
+    }
+
+    /// Ending (a) with a successful pin: cleanup continues deferred to
+    /// process exit (the loader's pin keeps executing code mapped).
+    #[test]
+    fn successful_pin_defers_cleanup_to_process_exit() {
+        let settlement = settle_shutdown(1, 1, || true);
+        assert_eq!(settlement.joined, 1);
+        assert_eq!(settlement.leaked, 1);
+        assert!(settlement.pinned);
+        assert!(matches!(settlement.unload, UnloadDecision::Pinned));
+    }
+
+    /// Nothing leaked: the pin seam is never even consulted, and the host
+    /// may free and unload normally.
+    #[test]
+    fn clean_shutdown_never_consults_the_pin_seam() {
+        let settlement = settle_shutdown(3, 0, || {
+            panic!("the self-pin must not run when no worker leaked")
+        });
+        assert_eq!(settlement.joined, 3);
+        assert_eq!(settlement.leaked, 0);
+        assert!(!settlement.pinned);
+        assert!(matches!(settlement.unload, UnloadDecision::Clean));
     }
 
     #[test]

@@ -30,7 +30,10 @@
 //!   outlives the join keeps running: this module pins its own DLL in the
 //!   loader so the host's `FreeLibrary` cannot unmap executing code (the
 //!   "keep references until natural exit" ending of the frozen unload-race
-//!   ruling) and reports the leak as a fatal diagnostic.
+//!   ruling) and reports the leak as a fatal diagnostic. A FAILED pin
+//!   blocks the deinit path entirely — deinit never returns into the
+//!   host's dlclose while a worker may still be executing this module
+//!   (leak-by-design, see [`state::settle_shutdown`]).
 //!
 //! # Slot ownership law
 //!
@@ -56,7 +59,9 @@
 //!   session);
 //! - natural completion: nothing (the worker submits the terminal and
 //!   releases its slot by itself);
-//! - deinit: [`shutdown`] (close-all + bounded join + pin-or-report);
+//! - deinit: [`shutdown`] (close-all + bounded join + pin-gated unload: a
+//!   failed self-pin returns [`state::UnloadDecision::BlockUnload`] and
+//!   the deinit seam blocks forever — never unload with live workers);
 //! - backend: [`backend_capabilities`] (comctl32 v6 probe, once).
 //!
 //! Only copyable request data and the Send port shim cross threads; the
@@ -508,24 +513,17 @@ pub(crate) fn teardown_orphaned(native: NativeModal) {
 }
 
 /// Deinit shutdown (design section 5.3): post close to every worker in
-/// reverse ordinal order, join within the shared 2s budget, then either
-/// report a clean shutdown or pin this DLL in the loader so the host's
-/// later `FreeLibrary` cannot unmap code a still-running worker executes
-/// (fatal diagnostic either way — the process should be investigated, not
-/// silently reused).
-pub(crate) struct ShutdownReport {
-    pub(crate) joined: usize,
-    pub(crate) leaked: usize,
-    pub(crate) pinned: bool,
-}
-
-pub(crate) fn shutdown() -> ShutdownReport {
+/// reverse ordinal order, join within the shared 2s budget, then settle
+/// the frozen unload-race endings through [`state::settle_shutdown`]:
+/// a successful module pin lets cleanup continue with the library mapped
+/// until process exit; a FAILED pin makes the settlement
+/// [`state::UnloadDecision::BlockUnload`] — `opentray_ext_deinit` then
+/// blocks forever instead of returning into the host's FreeLibrary/dlclose
+/// (never unload code a still-running worker executes; leak-by-design).
+pub(crate) fn shutdown() -> state::ShutdownSettlement {
     let deadline = Instant::now() + DIALOG_CLOSE_JOIN_BUDGET;
-    let mut report = ShutdownReport {
-        joined: 0,
-        leaked: 0,
-        pinned: false,
-    };
+    let mut joined = 0usize;
+    let mut leaked = 0usize;
 
     // Snapshot the occupied ordinals and post closes in reverse order
     // (later dialogs close first).
@@ -554,9 +552,9 @@ pub(crate) fn shutdown() -> ShutdownReport {
             Some(join) => {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 if join_worker_bounded(join, ordinal, remaining) {
-                    report.joined += 1;
+                    joined += 1;
                 } else {
-                    report.leaked += 1;
+                    leaked += 1;
                 }
             }
             None => {
@@ -566,15 +564,24 @@ pub(crate) fn shutdown() -> ShutdownReport {
         }
     }
 
-    if report.leaked > 0 {
-        // Ending (a): keep the library mapped until natural exit.
-        report.pinned = capability::pin_self_module().is_some();
-        eprintln!(
-            "opentray-ext-dialog: FATAL {} dialog worker(s) outlived the 2s join budget; \
-             module pin {} — cleanup deferred to process exit",
-            report.leaked,
-            if report.pinned { "succeeded" } else { "FAILED" },
-        );
+    // The frozen unload-race settlement: ending (a) pins this module so
+    // the host's later FreeLibrary cannot unmap code a still-running
+    // worker executes; a FAILED pin blocks the deinit path entirely.
+    let report = state::settle_shutdown(joined, leaked, || {
+        capability::pin_self_module().is_some()
+    });
+    match report.unload {
+        state::UnloadDecision::BlockUnload { fatal } => {
+            eprintln!("opentray-ext-dialog: FATAL {fatal}");
+        }
+        state::UnloadDecision::Pinned => {
+            eprintln!(
+                "opentray-ext-dialog: FATAL {} dialog worker(s) outlived the 2s join budget; \
+                 module pin succeeded — cleanup deferred to process exit",
+                report.leaked
+            );
+        }
+        state::UnloadDecision::Clean => {}
     }
     report
 }

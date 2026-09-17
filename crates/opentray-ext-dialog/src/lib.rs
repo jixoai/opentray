@@ -182,13 +182,25 @@ pub unsafe extern "C" fn opentray_ext_deinit(instance: *mut c_void) {
         // win32 unload-race ruling (design section 5.3): close-all + the
         // bounded 2s join happen BEFORE the instance Drop below can reach
         // FreeLibrary. A worker that outlives the join keeps running with
-        // this module pinned; shutdown() reports the fatal diagnostic.
+        // this module pinned. A FAILED pin is different: ending (a) is
+        // unavailable, so this deinit must NEVER return into the host's
+        // dlclose while a worker may still execute this module's code —
+        // block this thread forever (leak-by-design: the library stays
+        // loaded, the workers finish naturally, process exit reclaims
+        // everything).
         let report = windows::shutdown();
         if report.joined + report.leaked > 0 {
             eprintln!(
-                "opentray-ext-dialog: deinit joined {} dialog worker(s), leaked {}",
-                report.joined, report.leaked
+                "opentray-ext-dialog: deinit joined {} dialog worker(s), leaked {}, module \
+                 pin applied: {}",
+                report.joined, report.leaked, report.pinned
             );
+        }
+        if let state::UnloadDecision::BlockUnload { fatal } = report.unload {
+            eprintln!("opentray-ext-dialog: deinit blocked before unload: {fatal}");
+            loop {
+                std::thread::park();
+            }
         }
     }
     if !instance.is_null() {
