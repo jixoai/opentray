@@ -216,6 +216,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::create_headless_runtime;
+    use opentray_spec::PROTOCOL_VERSION;
 
     #[test]
     fn headless_runtime_owns_protocol_session_operations() {
@@ -230,7 +231,10 @@ mod tests {
             &runtime,
             json!({
                 "type": "init",
-                "protocolVersion": 1,
+                // The broker tracks the shared PROTOCOL_VERSION constant;
+                // a literal here broke silently when the constant moved to 2
+                // (release-run verify caught the stale 1).
+                "protocolVersion": PROTOCOL_VERSION,
                 "clientVersion": "0.9.0"
             }),
         );
