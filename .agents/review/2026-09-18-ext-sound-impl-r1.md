@@ -26,3 +26,77 @@ The three frozen generic-name projections resolve before platform projection; un
 **7.6/10.** This is below dialog Batch A **8.8**, Batch B **9.0**, and Batch C **9.1** because a documented public method is currently unusable against its own native producer, and the resource cap is not upheld at its I/O boundary.
 
 **Release chain: NO-GO.** Close both P1s and rerun the package suite plus relevant Rust/broker integration coverage. After that, the remaining planned evidence is Windows E acceptance, full gates, and merge; those may proceed only after this facade/native contract is coherent.
+
+## R1 -> R2 Repair Verification
+
+### P1-1: `getBackend` event shape -- closed
+
+Both native emitters now produce the facade DTO: sound at
+`crates/opentray-ext-sound/src/lib.rs:223-235` and dialog at
+`crates/opentray-ext-dialog/src/lib.rs:295-305` emit
+`{ type: "backend", backend }`, matching the sound parser at
+`packages/ext-sound/src/shared.ts:50-62`. The sound fixture serializes that
+native-shaped envelope and verifies both successful parsing and rejection of
+the retired `result/getBackend` form at
+`packages/ext-sound/src/index.test.ts:126-154,433-454`; dialog has the matching
+fixture at `packages/ext-dialog/src/index.test.ts:327-346`. The native package
+test includes `get_backend_answers_immediate_with_the_frozen_darwin_dto`.
+
+### P1-2: WAV pre-read cap -- not closed as specified
+
+The repair removes the separate pre-read `stat()` and opens once. Its loop at
+`packages/ext-sound/src/index.ts:242-284` reads at most
+`WAV_MAX_BYTES + 1` bytes from the file before rejecting. But it retains every
+chunk and then makes a second full copy through `Buffer.concat(chunks, total)`
+at line 278. An exactly-64-MiB file reaches byte validation with roughly 64 MiB
+of chunk backing buffers plus a new 64 MiB contiguous buffer, rather than the
+promised `cap + 1` byte memory maximum. The new sparse-file test verifies typed
+rejection and zero transport frames, but does not observe this allocation peak;
+its exact-cap case exercises the duplicate allocation.
+
+Repair by filling one preallocated bounded buffer, or parse RIFF incrementally,
+instead of retaining chunks and concatenating them. Add an injected file-handle
+or allocator seam that records maximum retained payload capacity on an
+exact-cap file.
+
+`pnpm --filter ./packages/ext-sound exec vitest run` passed **28/28**.
+`mbx test -p opentray-ext-sound -j 2` passed **26/26**. The requested
+`mbx cargo test` spelling is unsupported by the local mbx wrapper; `mbx test`
+is its Cargo-test entrypoint.
+
+**Updated score: 8.3/10, up from 7.6.** The public `getBackend` breakage is
+closed, but the remaining memory-bound violation is still a P1 at the frozen
+Win32 file-ingress boundary. **Release chain: NO-GO** until it is fixed; after
+that, the only remaining planned items are Windows E acceptance and full gates.
+
+## R3 Repair Verification
+
+### P1-2: WAV bounded-memory ingress -- closed
+
+Commit `cacd8e9a` replaces retained chunks plus `Buffer.concat()` with two
+passes over the same open `FileHandle` at
+`packages/ext-sound/src/index.ts:242-293`. Pass one uses one reusable 64 KiB
+buffer and rejects as soon as the accumulated byte count exceeds
+`WAV_MAX_BYTES`; it retains no file payload. Pass two allocates exactly the
+already-bounded count and fills it by explicit offsets. Thus an at-cap input
+has one 64 MiB validation buffer plus the 64 KiB counter buffer, and an
+over-cap input is rejected before allocating the validation buffer. Explicit
+positions on the same descriptor also prevent a pathname replacement between
+passes; a truncate is handled by validating only the readable prefix.
+
+The existing boundary fixture at `packages/ext-sound/src/index.test.ts:592-616`
+uses a sparse `WAV_MAX_BYTES + 2` file to assert pre-transport `size-cap`, then
+uses an exact-cap non-RIFF file to prove the second pass reaches byte
+validation. The implementation is direct enough to establish the corrected
+peak-allocation bound; this commit adds no new test code, but retains the
+relevant boundary test unchanged. `git diff --check cacd8e9a^..cacd8e9a` is
+clean.
+
+**Updated score: 9.2/10, up from 8.3.** Both R1 P1s are closed. This exceeds
+dialog Batch A (8.8) and Batch B (9.0), and is comparable to Batch C (9.1):
+the native arbiter and facade contracts are now coherent, with a remaining
+platform acceptance boundary rather than an implementation blocker.
+
+**Release integration: GO.** The remaining required release evidence is the
+Windows P0 picker repair re-run, full gates, and merge; none is a residual
+sound implementation P0/P1.
