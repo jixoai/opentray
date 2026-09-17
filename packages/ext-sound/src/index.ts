@@ -240,12 +240,12 @@ function createSoundCapability(
   };
 
   const readWavOrReject = async (path: string): Promise<void> => {
-    // Sound review R1 P1: a separate stat() then readFile() is TOCTOU —
-    // the file can grow between the two calls and an unbounded readFile
-    // would slurp past the frozen cap. Open once and read through a
-    // bounded loop: at most WAV_MAX_BYTES + 1 bytes ever enter memory,
-    // and the +1 byte proves the file is larger than the cap without
-    // reading the excess.
+    // Sound review R1 P1 (two rounds): no pre-read stat (TOCTOU), no
+    // chunks+concat double buffering (~2x peak). Two passes over the ONE
+    // open handle: pass 1 counts the length through a single reusable
+    // 64 KiB chunk (rejecting past the cap); pass 2 fills exactly one
+    // allocation of the counted size. Peak live memory is the file size
+    // plus one chunk — the cap holds at the I/O boundary.
     let handle: FileHandle;
     try {
       handle = await open(path, "r");
@@ -253,30 +253,38 @@ function createSoundCapability(
       throw fileUnreadable(path, error);
     }
     try {
-      const chunks: Buffer[] = [];
-      let total = 0;
-      const cap = WAV_MAX_BYTES + 1;
+      const chunk = Buffer.alloc(64 * 1024);
+      let size = 0;
       for (;;) {
-        const { bytesRead, buffer } = await handle.read({
-          buffer: Buffer.alloc(Math.min(64 * 1024, cap - total)),
-          position: total,
-        });
+        const { bytesRead } = await handle.read({ buffer: chunk, position: size });
         if (bytesRead === 0) {
           break;
         }
-        chunks.push(buffer.subarray(0, bytesRead));
-        total += bytesRead;
-        if (total >= cap) {
+        size += bytesRead;
+        if (size > WAV_MAX_BYTES) {
           // The frozen size bounds reject by streamed length, not by a
           // pre-read stat (design reference section 1.3).
           throw formatUnsupported(path, "size-cap");
         }
       }
-      if (total < WAV_MIN_BYTES) {
+      if (size < WAV_MIN_BYTES) {
         throw formatUnsupported(path, "too-small");
       }
-      const bytes = Buffer.concat(chunks, total);
-      const rejection = validateWavBytes(bytes);
+      const bytes = Buffer.alloc(size);
+      let filled = 0;
+      while (filled < size) {
+        const { bytesRead } = await handle.read({
+          buffer: bytes.subarray(filled),
+          position: filled,
+        });
+        if (bytesRead === 0) {
+          // The file shrank between the two passes on the same handle;
+          // validate the consistent prefix that is still there.
+          break;
+        }
+        filled += bytesRead;
+      }
+      const rejection = validateWavBytes(bytes.subarray(0, filled));
       if (rejection !== null) {
         throw formatUnsupported(path, rejection);
       }
