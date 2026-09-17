@@ -35,19 +35,23 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use super::ffi::{wide, DISPATCHER_CLASS_NAME, HWND_MESSAGE, WM_APP_DIALOG_CLOSE};
 
+
 /// What the worker is currently showing. Guarded by the worker-shared
-/// mutex; every variant's native handles are owned by the worker thread and
-/// only ever touched from the dispatcher `WndProc` (which runs on the
-/// worker thread inside the modal pump).
+/// mutex; the message-dialog variants' native handles are owned by the
+/// worker thread and only ever touched from the dispatcher `WndProc`
+/// (which runs on the worker thread inside the modal pump). The picker
+/// variant is a state marker only (batch E P0: pickers dismiss from the
+/// owner thread).
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum DialogTarget {
     /// Constructing; nothing dismissible yet (the early-close flag covers
     /// this window).
     None,
     TaskDialog { hwnd: HWND },
-    /// A live `IFileDialog` modal. The dismissal carries no COM surface:
-    /// it posts `WM_CLOSE` to the thread's windows (batch E P0), so no
-    /// interface pointer is published at all.
+    /// A live `IFileDialog` modal: a state marker only (batch E P0). The
+    /// picker dismissal runs on the OWNER thread and carries no COM
+    /// surface, so no interface pointer is published at all, and the
+    /// worker-thread close arm is an explicit no-op.
     FileDialog,
     MessageBox,
 }
@@ -86,8 +90,17 @@ pub(crate) struct WorkerShared {
     pub(crate) dialog_hwnd: AtomicIsize,
     /// The dispatcher message-only window, published after creation.
     pub(crate) dispatcher_hwnd: AtomicIsize,
-    /// The owning worker thread id (diagnostics + MessageBox close search).
+    /// The owning worker thread id (diagnostics + MessageBox close search
+    /// + the owner-side picker dismissal's enumeration target).
     pub(crate) thread_id: AtomicU32,
+    /// True when this worker's modal is a file picker (pickFile /
+    /// pickDirectory / pickSavePath): the close projection must stay off
+    /// the picker's own pump (batch E P0) and dismiss from the owner
+    /// thread instead. Set at spawn time, before the thread exists.
+    pub(crate) picker: AtomicBool,
+    /// True once the worker body finished (its last bookkeeping): the
+    /// owner-side picker dismissal stops retrying after it.
+    pub(crate) exited: AtomicBool,
     pub(crate) target: Mutex<DialogTarget>,
     /// The one-shot pre-Accept entry handshake sender. Taken (dropped) by
     /// the worker body when the handshake completes.
@@ -105,9 +118,17 @@ impl WorkerShared {
             dialog_hwnd: AtomicIsize::new(0),
             dispatcher_hwnd: AtomicIsize::new(0),
             thread_id: AtomicU32::new(0),
+            picker: AtomicBool::new(false),
+            exited: AtomicBool::new(false),
             target: Mutex::new(DialogTarget::None),
             entry: Mutex::new(None),
         })
+    }
+
+    /// Marks this worker as a picker host (owner side, spawn time, before
+    /// any close can race it).
+    pub(crate) fn mark_picker(&self) {
+        self.picker.store(true, Ordering::Release);
     }
 
     /// True once the worker published its dispatcher window: the point from
@@ -156,10 +177,25 @@ impl WorkerShared {
             .unwrap_or_else(|error| error.into_inner()) = None;
     }
 
-    /// Posts the `WM_APP + ordinal` close message. Callable from any
-    /// thread (posting is thread-safe); the handling stays on the worker.
+    /// Projects the close. Callable from any thread (posting is
+    /// thread-safe). Two dismissal families (batch E P0):
+    ///
+    /// - **Message dialogs** (TaskDialog/MessageBox): post the
+    ///   `WM_APP + ordinal` message to the dispatcher; the modal's own pump
+    ///   delivers it on the worker thread (the proven MessageBox arm).
+    /// - **Pickers**: NEVER post WM_APP — the picker's modal pump is the
+    ///   shell's dialog loop, which access-violates handling a foreign
+    ///   message-only-window message before any WndProc of ours can run
+    ///   (the real-machine 0xC0000005 in comdlg32.dll, the legacy dialog
+    ///   host used without a comctl32 v6 activation context). The
+    ///   dismissal runs HERE, on the calling thread:
+    ///   [`WorkerShared::dismiss_picker_from_owner`].
     pub(crate) fn request_close(&self) {
         self.close_requested.store(true, Ordering::Release);
+        if self.picker.load(Ordering::Acquire) {
+            self.dismiss_picker_from_owner();
+            return;
+        }
         let dispatcher = self.dispatcher_hwnd.load(Ordering::Acquire) as HWND;
         if !dispatcher.is_null() {
             // SAFETY: a published, valid dispatcher HWND; PostMessageW only
@@ -174,6 +210,83 @@ impl WorkerShared {
             }
         }
     }
+
+    /// Dismisses a live picker from the OWNER thread (batch E P0): no
+    /// message is routed through the picker's own pump and no COM surface
+    /// is touched. `EnumThreadWindows` takes the worker's thread id and
+    /// runs its callback on THIS thread, so the picker's top-level windows
+    /// are found and closed without the worker executing anything: each
+    /// non-dispatcher window receives `WM_CLOSE`, the dialog's own pump
+    /// settles it exactly like title-bar dismissal, `Show` returns
+    /// `ERROR_CANCELLED`, and the worker's normal settle path yields the
+    /// cancel-branch terminal (the exactly-once transaction is unchanged).
+    ///
+    /// A close that races picker construction finds no window yet: the
+    /// bounded retry keeps looking (the worker either enters `Show` — the
+    /// dialog window appears and one WM_CLOSE lands — or skips the modal
+    /// entirely through the `close_requested` pre-entry check and exits).
+    fn dismiss_picker_from_owner(&self) {
+        let dispatcher = self.dispatcher_hwnd.load(Ordering::Acquire) as usize;
+        let deadline = std::time::Instant::now() + PICKER_CLOSE_RETRY_BUDGET;
+        loop {
+            let windows = collect_thread_windows(self.thread_id.load(Ordering::Acquire));
+            struct PostCloseSink;
+            impl crate::state::PickerCloseSink for PostCloseSink {
+                fn post_close(&mut self, window: usize) {
+                    // SAFETY: a window of the picker worker's thread;
+                    // PostMessageW only enqueues and is thread-safe — the
+                    // picker's own pump delivers and settles the close.
+                    unsafe {
+                        PostMessageW(window as HWND, WM_CLOSE, 0, 0);
+                    }
+                }
+            }
+            let report = crate::state::picker_dismissal_transaction(
+                &windows,
+                dispatcher,
+                &mut PostCloseSink,
+            );
+            if !report.posted_close.is_empty() {
+                return;
+            }
+            // Nothing dismissible yet (construction race) or already gone.
+            if self.exited.load(Ordering::Acquire) || std::time::Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(PICKER_CLOSE_RETRY_CADENCE);
+        }
+    }
+}
+
+/// The picker dismissal retry law (batch E P0): retry while the worker
+/// might still be constructing its dialog, bounded so a session close (or
+/// the deinit join path) never blocks the owner for more than this.
+const PICKER_CLOSE_RETRY_BUDGET: std::time::Duration = std::time::Duration::from_millis(1000);
+const PICKER_CLOSE_RETRY_CADENCE: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// Collects the current top-level windows of one thread. Callable from any
+/// thread (`EnumThreadWindows` addresses windows by owning thread id; the
+/// callback runs on the calling thread).
+fn collect_thread_windows(thread_id: u32) -> Vec<usize> {
+    let mut windows: Vec<usize> = Vec::new();
+    unsafe extern "system" fn collect_proc(hwnd: HWND, lparam: LPARAM) -> i32 {
+        let windows = unsafe { &mut *(lparam as *mut Vec<usize>) };
+        windows.push(hwnd as usize);
+        // Enumerate every window: a common dialog may own more than one
+        // top-level window (drop-downs/context popups), and the dismissal
+        // transaction filters the dispatcher itself.
+        1
+    }
+    // SAFETY: the callback only pushes through the lparam the caller owns;
+    // the enumeration runs synchronously on this thread.
+    unsafe {
+        EnumThreadWindows(
+            thread_id,
+            Some(collect_proc),
+            &mut windows as *mut Vec<usize> as LPARAM,
+        );
+    }
+    windows
 }
 
 /// The pre-Accept entry handshake outcome, sent exactly once per worker.
@@ -291,7 +404,15 @@ fn close_from_worker_thread(shared: &WorkerShared) {
             }
         }
         DialogTarget::FileDialog => {
-            close_file_dialog_on_worker_thread(shared);
+            // Unreachable by construction (batch E P0): `request_close`
+            // never posts WM_APP for picker workers, so no WM_APP can be
+            // delivered by the picker's pump. The picker dismissal runs on
+            // the owner thread (`dismiss_picker_from_owner`) precisely
+            // because this dispatcher context — reentered inside the
+            // shell's dialog loop — is where the legacy dialog host
+            // fault-killed the process before any worker-thread code could
+            // run. Kept as an explicit no-op so a future regression cannot
+            // silently reintroduce a worker-thread picker projection.
         }
         DialogTarget::MessageBox => {
             close_message_box_on_worker_thread(shared);
@@ -335,50 +456,10 @@ fn close_message_box_on_worker_thread(shared: &WorkerShared) {
     }
 }
 
-/// Dismisses a live file dialog through posted `WM_CLOSE` (batch E P0):
-/// enumerate the worker thread's top-level windows, skip the hidden
-/// dispatcher, and post `WM_CLOSE` to every other window — the dialog's
-/// own pump then ends `Show` with `ERROR_CANCELLED`, which the existing
-/// cancel branch settles through the exactly-once terminal transaction.
-/// The decision core is the platform-neutral
-/// [`state::picker_dismissal_transaction`]; the reentrant
-/// `IFileDialog::Close` from this dispatcher context (a WndProc reentered
-/// inside `Show`'s pump — outside the documented "from a callback while
-/// the dialog is open" contract) fault-killed the process with
-/// 0xC0000005 and is deleted from the product surface.
-fn close_file_dialog_on_worker_thread(shared: &WorkerShared) {
-    let dispatcher = shared.dispatcher_hwnd.load(Ordering::Acquire) as usize;
-    let thread_id = shared.thread_id.load(Ordering::Relaxed);
-    let mut windows: Vec<usize> = Vec::new();
-    unsafe extern "system" fn collect_proc(hwnd: HWND, lparam: LPARAM) -> i32 {
-        let windows = unsafe { &mut *(lparam as *mut Vec<usize>) };
-        windows.push(hwnd as usize);
-        // Enumerate every window: a Vista common dialog may own more than
-        // one top-level window, and the transaction filters the dispatcher.
-        1
-    }
-    // SAFETY: the callback only pushes through the lparam the caller owns;
-    // the enumeration runs synchronously on this thread.
-    unsafe {
-        EnumThreadWindows(
-            thread_id,
-            Some(collect_proc),
-            &mut windows as *mut Vec<usize> as LPARAM,
-        );
-    }
-    struct PostCloseSink;
-    impl crate::state::PickerCloseSink for PostCloseSink {
-        fn post_close(&mut self, window: usize) {
-            // SAFETY: the window came from this thread's enumeration;
-            // PostMessageW only enqueues — the dialog's own pump delivers.
-            unsafe {
-                PostMessageW(window as HWND, WM_CLOSE, 0, 0);
-            }
-        }
-    }
-    let _ = crate::state::picker_dismissal_transaction(&windows, dispatcher, &mut PostCloseSink);
-}
-
+/// Dismisses a live file dialog through posted `WM_CLOSE` — from the OWNER
+/// thread; see [`WorkerShared::dismiss_picker_from_owner`] (the worker
+/// thread never executes dismissal code inside the picker's pump).
+///
 /// Creates the message-only dispatcher window on the current (worker)
 /// thread. The window holds one leaked Arc reference (released by
 /// [`destroy_dispatcher_window`]).
@@ -449,6 +530,15 @@ pub(super) unsafe fn destroy_dispatcher_window(shared: &WorkerShared) {
     if !value.is_null() {
         drop(unsafe { Arc::from_raw(value) });
     }
+}
+
+/// Publishes the owning thread id WITHOUT creating the dispatcher window
+/// (picker workers, batch E: their dismissal runs on the owner thread, so
+/// the STA thread hosts nothing but the shell dialog itself).
+pub(super) fn publish_thread_id(shared: &WorkerShared) {
+    shared
+        .thread_id
+        .store(unsafe { GetCurrentThreadId() }, Ordering::Release);
 }
 
 /// Initializes COM STA on the worker thread. Returns Err(message) when the

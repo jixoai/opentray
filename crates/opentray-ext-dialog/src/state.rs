@@ -488,16 +488,18 @@ pub(crate) fn worker_completion_transaction(
 }
 
 // ---------------------------------------------------------------------------
-// win32 picker dismissal core (batch E P0, 2026-09-18): posted WM_CLOSE,
-// never the reentrant IFileDialog::Close. Host-compiled law behind a
+// win32 picker dismissal core (batch E P0, 2026-09-18): posted WM_CLOSE
+// from the OWNER thread, never a message through the picker's own pump
+// and never the reentrant IFileDialog::Close. Host-compiled law behind a
 // post-only seam; `windows/worker.rs` wires the real EnumThreadWindows +
 // PostMessageW halves (the same PlaybackArbiter-style seam split as
 // ext-sound).
 // ---------------------------------------------------------------------------
 
 /// The native post-only sink of one picker dismissal (the seam):
-/// production posts `WM_CLOSE` through the worker thread's window
-/// enumeration on Windows; tests inject recording spies.
+/// production enumerates the picker worker's thread windows and posts
+/// `WM_CLOSE` from the owner thread on Windows; tests inject recording
+/// spies.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) trait PickerCloseSink {
     /// Posts `WM_CLOSE` to one top-level window owned by the picker's
@@ -514,15 +516,19 @@ pub(crate) struct PickerDismissalReport {
 }
 
 /// The picker dismissal law (batch E P0): a live `IFileDialog` is
-/// dismissed ONLY by posting `WM_CLOSE` to every non-dispatcher top-level
-/// window of the worker thread; the dialog's own pump then ends `Show`
-/// with `ERROR_CANCELLED`, which the existing cancel branch settles
-/// through the exactly-once terminal transaction. The reentrant
-/// `IFileDialog::Close` from the dispatcher WndProc — a call outside the
-/// documented "from a callback method or function while the dialog is
-/// open" contract that fault-killed the broker with 0xC0000005 — is
-/// deleted from the product surface: this transaction is the entire
-/// dismissal and its only native action is
+/// dismissed ONLY by posting `WM_CLOSE` — from the OWNER thread — to
+/// every non-dispatcher top-level window of the picker's worker thread;
+/// the dialog's own pump then ends `Show` with `ERROR_CANCELLED`, which
+/// the existing cancel branch settles through the exactly-once terminal
+/// transaction. Two mechanisms are outlawed by history: the reentrant
+/// `IFileDialog::Close` from worker-thread code (outside the documented
+/// "from a callback method or function while the dialog is open"
+/// contract), and ANY message routed to the worker's message-only
+/// dispatcher while a picker pumps — the shell's dialog loop (the legacy
+/// comdlg32 host used without a comctl32 v6 activation context)
+/// access-violates handling a foreign message-only-window message before
+/// any worker-thread code can run, which was the real-machine 0xC0000005.
+/// This transaction is the entire dismissal and its only native action is
 /// [`PickerCloseSink::post_close`], so a COM close is not even
 /// expressible on the path.
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]

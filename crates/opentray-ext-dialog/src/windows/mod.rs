@@ -180,6 +180,15 @@ fn worker_limit_error(scope: &CommandScope) -> TypedExtensionError {
     )
 }
 
+/// True when the modal is a file picker (the owner-thread dismissal
+/// family, batch E P0).
+fn modal_is_picker(kind: &ModalKind) -> bool {
+    matches!(
+        kind,
+        ModalKind::PickFile(_) | ModalKind::PickDirectory(_) | ModalKind::PickSavePath(_)
+    )
+}
+
 /// Reserves one registry slot for a scope. Atomic busy + limit under one
 /// lock: both checks happen before the slot is written, so a rejection
 /// never mutates state (task 3.3: a full pool rejects BEFORE queuing, and
@@ -247,6 +256,11 @@ pub(crate) fn begin(
     }
 
     let shared = reserve_slot(scope, kind.label())?;
+    // Before the thread exists: a close that races spawn must already know
+    // the dismissal family (picker workers never receive the WM_APP close).
+    if modal_is_picker(kind) {
+        shared.mark_picker();
+    }
 
     let (entry_tx, entry_rx) = mpsc::channel::<EntryOutcome>();
     shared.install_entry(entry_tx);
@@ -356,8 +370,13 @@ fn run_worker(request: WorkerRequest) {
         }
     };
     // SAFETY: this thread initialized STA and owns the shared block for
-    // the window lifetime.
-    if let Err(message) = unsafe { worker::create_dispatcher_window(&shared) } {
+    // the window lifetime. Picker workers deliberately create NO
+    // dispatcher window (batch E): their dismissal runs on the owner
+    // thread, and a message-only window on the picker's STA thread makes
+    // the shell dialog host fault at entry (the real-machine 0xC0000005).
+    if shared.picker.load(Ordering::Acquire) {
+        worker::publish_thread_id(&shared);
+    } else if let Err(message) = unsafe { worker::create_dispatcher_window(&shared) } {
         let _ = shared.send_entry(EntryOutcome::Failed {
             error: state::typed_error(error_code::PRESENTATION_FAILED, message),
         });
@@ -440,7 +459,10 @@ fn run_worker(request: WorkerRequest) {
         }
     }
 
-    // The single release authority (see the slot ownership law).
+    // The single release authority (see the slot ownership law). The
+    // exited flag lands FIRST: the owner-side picker dismissal stops
+    // retrying the moment the worker is done, before the slot frees.
+    shared.exited.store(true, Ordering::Release);
     take_slot(shared.ordinal);
 }
 

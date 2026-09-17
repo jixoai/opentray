@@ -11,11 +11,15 @@
 //! dispatch until `TDN_CREATED` / `IFileDialog::Show`-entry /
 //! MessageBox-entry), and the single terminal travels through the deferred
 //! port from the worker thread. Programmatic dismissal is the production
-//! close vector: `opentray_ext_session_closed` projects the WM_APP close
-//! through the worker's message-only dispatcher, the native modal exits on
-//! its own thread, and the cancel-branch terminal is recorded by this
-//! probe's port. No synthetic keyboard input is used, so nothing depends
-//! on the host desktop being interactive; a hard watchdog force-exits the
+//! close vector: `opentray_ext_session_closed` projects the close per
+//! dialog family — message dialogs through the WM_APP dispatcher message
+//! delivered by the modal's own pump on the worker thread; pickers
+//! through `WM_CLOSE` posted from the OWNER thread to the worker's
+//! non-dispatcher windows (batch E P0: no COM close, no message through
+//! the picker's own pump) — and the cancel-branch terminal is recorded by
+//! this probe's port. No synthetic keyboard input is used, so nothing
+//! depends on the host desktop being interactive; a hard watchdog
+//! force-exits the
 //! process (killing any still-open modal with it) if a step wedges.
 //!
 //! Matrix:
@@ -842,19 +846,23 @@ mod probe {
     }
 
     /// Case W6: pickers driven to cancel through session close
-    /// (IFileDialog::Show dismissed by posted WM_CLOSE through the
-    /// worker-thread window enumeration — batch E P0 fix).
+    /// (IFileDialog::Show dismissed by WM_CLOSE posted from the OWNER
+    /// thread to the worker thread's windows — batch E P0 fix; the
+    /// picker's own pump is never entered by the close projection).
     ///
     /// `OPENTRAY_DIALOG_PROBE_SKIP_PICKERS=1` records the case as SKIPPED —
-    /// the crash-isolation run used while diagnosing the real-machine
-    /// IFileDialog access violation (see batch-e-windows.md).
+    /// the crash-isolation knob for hosts where the picker surface itself
+    /// access-violates inside shell dialog hosting (see the platform
+    /// finding in batch-e-windows.md: that crash is independent of the
+    /// close vector).
     fn case_pickers_cancel(harness: &mut Harness, report: &mut CaseReport) {
         if std::env::var("OPENTRAY_DIALOG_PROBE_SKIP_PICKERS").is_ok() {
             report.status = "SKIPPED".to_string();
             report.note(
-                "SKIPPED via OPENTRAY_DIALOG_PROBE_SKIP_PICKERS (crash isolation run: the \
-                 first IFileDialog::Show dismissal access-violates on this host; the \
-                 remaining matrix runs without pickers)",
+                "SKIPPED via OPENTRAY_DIALOG_PROBE_SKIP_PICKERS (crash isolation run: this \
+                 host's picker surface access-violates inside shell dialog hosting at Show \
+                 entry, independent of the close vector — see the platform finding in \
+                 batch-e-windows.md; the remaining matrix runs without pickers)",
             );
             return;
         }
@@ -904,9 +912,9 @@ mod probe {
         report.extras = serde_json::Value::Object(per_picker);
         report.note(
             "filters:[] behaves as all-files (the native empty-list -> no SetFileTypes \
-             normalization); each picker was dismissed by posted WM_CLOSE to the \
-             worker thread's non-dispatcher windows (batch E P0 fix: the reentrant \
-             IFileDialog::Close is gone from the close path)",
+             normalization); each picker was dismissed by WM_CLOSE posted from the \
+             owner thread to the worker thread's non-dispatcher windows (batch E P0 \
+             fix: no COM close, and no message through the picker's own pump)",
         );
     }
 
@@ -1108,14 +1116,14 @@ mod probe {
     }
 
     /// Diagnostic case (`OPENTRAY_DIALOG_PROBE_PICKER_DIAG=1`): the crash
-    /// discriminator that isolated the real-machine IFileDialog access
-    /// violation (batch E P0). Marker lines bracket the two windows:
-    /// (A) inside `IFileDialog::Show`'s own pump with no close in flight,
-    /// (B) after the session close posts the WM_APP dispatcher message
-    /// that projects the worker-thread dismissal (posted WM_CLOSE since
-    /// the P0 fix; historically the reentrant IFileDialog::Close). Both
-    /// windows must survive; a marker followed by process death was the
-    /// verdict naming the faulting half.
+    /// discriminator for the real-machine picker access violation (batch E
+    /// P0). Marker lines bracket the two windows: (A) inside
+    /// `IFileDialog::Show`'s own pump with no close in flight, (B) after
+    /// the session close projects the owner-thread WM_CLOSE dismissal.
+    /// Both windows must survive on a healthy host; on hosts with the
+    /// shell-hosting platform finding, process death can land inside
+    /// EITHER window (the fault is time-fused ~9s after Show entry and
+    /// independent of the close vector — see batch-e-windows.md).
     fn case_picker_close_diag(harness: &mut Harness, report: &mut CaseReport) {
         // OPENTRAY_DIALOG_PROBE_PICKER_HOLD_MS lengthens window A (default
         // 700ms): if a late close survives where an immediate one faults,
@@ -1146,8 +1154,8 @@ mod probe {
         std::thread::sleep(Duration::from_millis(hold_ms));
         println!("picker-close-diag: window A survived");
         println!(
-            "picker-close-diag: window B: posting session close (WM_APP dispatcher -> \
-             posted WM_CLOSE to the thread's non-dispatcher windows)"
+            "picker-close-diag: window B: posting session close (owner thread posts \
+             WM_CLOSE to the picker worker's non-dispatcher windows)"
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());
         close_session(report, harness.instance, "w-picker-diag");

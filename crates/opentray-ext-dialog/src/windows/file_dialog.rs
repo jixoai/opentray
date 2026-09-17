@@ -3,9 +3,10 @@
 //!
 //! Every COM object is created, configured, shown, and released on the
 //! owning STA worker thread. The dismissal path never touches a COM
-//! surface: the dispatcher close posts `WM_CLOSE` to the thread's
-//! non-dispatcher windows (see `close_file_dialog_on_worker_thread` in
-//! `worker.rs`, batch E P0), the dialog's own pump ends `Show` with
+//! surface and never routes a message through the picker's own pump: the
+//! owner thread posts `WM_CLOSE` to the worker thread's non-dispatcher
+//! windows (see `WorkerShared::dismiss_picker_from_owner` in `worker.rs`,
+//! batch E P0), the dialog's own pump ends `Show` with
 //! `ERROR_CANCELLED`, and the existing cancel branch below settles the
 //! terminal — so no interface pointer is ever published or reentered
 //! from the modal pump.
