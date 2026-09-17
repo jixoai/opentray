@@ -498,6 +498,16 @@ describe("@opentray/ext-dialog", () => {
       type: "ext-command",
       data: { type: "pickSavePath", options: { fileNameLabel: "out" } },
     });
+
+    // Combination boundary (batch C review P2): an orphan
+    // defaultFilterIndex against the empty-array all-files spelling is
+    // still a preflight rejection — there is no filter to index into.
+    await expect(
+      dialog.pickFile({ filters: [], defaultFilterIndex: 0 })
+    ).rejects.toMatchObject({
+      code: DIALOG_ERROR_CODES.invalidOptions,
+      details: { kind: "options", field: "defaultFilterIndex" },
+    });
   });
 
   it("rejects every method on linux with a typed platform error before load", async () => {
