@@ -1,35 +1,43 @@
-# add-ext-dialog — Self-Review（设计阶段）
+# add-ext-dialog — Self-Review（实现阶段）
 
-> 评审人：编排者。对象：R4 修订后的 design-reference / spec delta / tasks。
-> 性质：**research-plan 阶段自评**——实现尚未开始；本档在 apply 各批次完成后更新为实现自评。
+> 评审人：编排者。对象：批次 A–D 实现 + 批次 C 复核后的完整 change 状态。
+> 性质：**实现自评**——批次 A（协议/共享基建）、批次 B（原生 crate 双平台）、批次 C（facade）、
+> 批次 D（打包/CI 证据）已完成并经 Codex 分批复核；批次 E（双平台 GUI 真机验收，task 6.1）与
+> 全量门/发布链（tasks 6.2/7.x）仍由编排者收口，本档不代勾。
 
 ## 总判定
 
-设计经 Codex 四轮对抗评审（4.0 → 5.0 → 5.8 → 6.7）迭代收敛，R4 全部 P0/P1 已吸收
-（ABI C 布局冻结、macOS re-arm 机制、唯一终帧源、win32 pre-Accept 失败事务与卸载竞态
-裁决、可实现身份顺序 SSOT 统一、可执行一致性门、AGENTS.md 预落法则）。
-当前状态：**设计冻结候选，等待 R5 复核 GO 后进入批次 A 实现**。
+设计经 Codex 七轮对抗评审（4.0 → 5.0 → 5.8 → 6.7 → 7.4 → 8.2 → 8.8 GO）冻结；实现经三轮
+分批复核——**批次 A 8.8/10、批次 B 9.0/10（批次 E GO）、批次 C 9.1/10（代码 GO，发布链
+NO-GO 待本 docs/发布波）**——全部 P0/P1 已由实现与测试闭环。当前状态：**实现完成，
+等待批次 E 真机验收 + 全量门 + 发布链收口（7.1 法则定稿已落，7.2 消费文档已落，
+minor changeset/合并/发布待办）**。
 
-## 对照 R4 的闭合自查
+## 复核得分与闭合台账
 
-| R4 项 | 落点 | 自查结论 |
-|---|---|---|
-| P0-1 ABI 事务 | design §5.1（ExtCommandDispositionV1 repr(C)、attach(instance,port)、handle u64/十六进制 wire、payload 上限引用 EventPort 常量、protocol 1→2、旧扩展恒 Immediate） | 闭合 |
-| P0-2 re-arm/唯一终帧源 | design §5.2（回调写原子 deadline → broker-owned wake → 重算 WaitUntil；poll 只返回 Pending；「实现批二选一」作废） | 闭合 |
-| P0-3 失败事务/卸载竞态 | design §5.3（pre-entry 失败 = 原 requestId 同步 typed error；join 超时 = 保留引用至退出或放弃清理，绝不 use-after-unload） | 闭合 |
-| P0-5 身份链 SSOT | plan D-表/design §6.4/tasks 2.3/两 spec 场景统一为可实现序 + sha256/buildIdentity 字段 | 闭合 |
-| P0-6 可信 grep 门 | `scripts/openspec/check-ext-dialog-sound-consistency.mjs`（可执行、allowlist 负面标记、本轮实测 OK）+ 全部规范性残留清理 | 闭合 |
-| P1-1/2/3/4/5 | 场景字段 / getBackend 措辞 / comctl6 工程任务 3.3b / EventPort 常量引用 / AGENTS.md 预落法则 | 闭合 |
+| 批次 | 复核 | 得分 | 关键发现 → 闭环证据 |
+|---|---|---|---|
+| A（协议+基建） | batchA-impl r1→r4 | **8.8/10** | P0-1 SDK 终帧自拒、P1-1 port 生命周期临界区、P1-2 close 先 purge、P1-3 无 port Deferred 悬挂、P1-4 details wire 同构、P1-5 真库四格 fixture、P1-6 四目标矩阵强制、P1-7 handle 可预测、P1-8 drain 排空、P1-9 Ready 版本校验 → commits 730295af / 0401d4d0 / 75d30a76 / 7f9d11cc（spec 61 / core 46 / bin 109 / cli 146×2 全绿；r4 复验通过） |
+| B（原生 crate） | batchB-impl r1 + 对抗轮 | **9.0/10，批次 E GO** | 对抗 P1：pre-entry 失败仍发终帧（双应答）/file dialog 构造失败无 entry 信号 → 8663387a 显式 entered 状态机（未进入 = 零 Accepted/零终帧/零 port 提交，同步 typed 错误回原 requestId）；对抗 P1：join 超时后 pin 失败仍返回进 dlclose → 91a9b87d BlockUnload（deinit 永久驻留，绝不带着活 worker 返回）；剩余扣分仅为本机无法独立复现真实 Win32 GUI 路径（批次 E 真机收口） |
+| C（facade） | batchC-impl r1 | **9.1/10，代码 GO** | P1：`filters: []` 被 preflight 拒绝，违反「空/缺省 = 全部文件」 → 3449868b（显式空数组归一为 wire 省略；darwin `setAllowedContentTypes([])` = 不可选任何文件，win32 空表跳过 SetFileTypes；Node 22/22 复验）；P2：空 filters + 孤儿 defaultFilterIndex 组合边界 → 5c25f86f 回归测试 |
+| D（打包/CI） | CI 实证（PR #7，run 35225263870） | — | 真实 pack 1,380,024 B（≈1.32 MiB，低于 2 MiB 警戒线）；解包逐 target 重哈希 4/4 OK；回执入 `ext-dialog-pack-evidence` artifact |
 
 ## 已知边界（诚实声明）
 
-1.Accepted 语义在两平台不同（mac=已呈现 vs win=已进入模态调用）——以平台注记形式冻结在
-design §5.3，spec 措辞采用 win32 诚实定义。
+1. Accepted 语义两平台不同（mac=已呈现 vs win=已进入模态调用）——冻结在 design §5.3，
+   spec 措辞采用 win32 诚实定义；批次 E 真机取证后如需修正只改证据档不改法则。
 2. hash-then-load 的 TOCTOU 残余窗口是已知边界（OS 竞态不可全消），CI 重 hash 为发布权威。
-3. macOS probe / win32 per-API probe 是批次 B 前置任务，其证据将在实现期回填本档。
+3. 批次 B 复核的 seam-only 断言强度（BlockUnload 未真实调用不可返回的 deinit）为覆盖增强项，
+   非实现矛盾；批次 E 真机覆盖后复核。
+4. 批次 E（tasks 6.1）双平台 GUI 真机验收与 6.2 全量门未完成——本档不宣告发布 GO
+   （批次 C 复核的「发布链 NO-GO」在批次 E + 7.3 发布完成前维持）。
 
 ## Git 证据
 
-- 本阶段 commits：93ce37c5（R1 版）→ 82981086（R2 版）→ 本次（R3 版）。
-- 评审链：.agents/review/2026-09-17-ext-dialog-sound-r{1,2,3}.md。
-- validate：通过（每次修订后重跑）。
+- 设计链：93ce37c5（R1）→ …（R2–R6 修订）→ R7 GO 开工。
+- 实现链：ce4d7a98..（批次 A）→ 575ea2c7/0db46e30/45bd5032（批次 B）→ 2348d6e6/98d343cd
+  （批次 C）→ 44006a7c/fb99a95e（批次 D）→ 8663387a/91a9b87d（批次 B 对抗闭环）→
+  3449868b/5c25f86f（批次 C 闭环）。
+- 评审链：.agents/review/2026-09-17-ext-dialog-sound-r{1..7}.md（设计）+
+  extdlg-batch{A,B,C}-impl-r*.md（实现）。
+- validate / verify:spec-consistency：通过（每次修订后重跑）。
