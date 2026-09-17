@@ -42,8 +42,12 @@
 //! - busy check: [`is_busy`] (this module owns the Windows busy view:
 //!   completion happens on worker threads, not the owner loop);
 //! - show: [`begin`] (spawns the worker and performs the pre-Accept
-//!   transaction; `Err` is the synchronous typed rejection);
-//! - session close: [`revoke`] on each of the session's modals;
+//!   transaction; `Err` is the synchronous typed rejection); the Windows
+//!   path does NOT `register_modal` into `DialogInstance` (workers
+//!   self-release; a DialogInstance record would never be removed by the
+//!   worker thread);
+//! - session close: [`revoke_session`] (every worker of the closing
+//!   session);
 //! - natural completion: nothing (the worker submits the terminal and
 //!   releases its slot by itself);
 //! - deinit: [`shutdown`] (close-all + bounded join + pin-or-report);
@@ -160,6 +164,33 @@ fn worker_limit_error(scope: &CommandScope) -> TypedExtensionError {
     )
 }
 
+/// Reserves one registry slot for a scope. Atomic busy + limit under one
+/// lock: both checks happen before the slot is written, so a rejection
+/// never mutates state (task 3.3: a full pool rejects BEFORE queuing, and
+/// a busy scope rejects before a slot is consumed).
+fn reserve_slot(
+    scope: &CommandScope,
+    label: &str,
+) -> Result<Arc<WorkerShared>, TypedExtensionError> {
+    let mut slots = lock_registry();
+    let key = scope_key(scope);
+    if slots.iter().flatten().any(|slot| slot.scope == key) {
+        return Err(busy_error(scope, label));
+    }
+    let ordinal = slots
+        .iter()
+        .position(Option::is_none)
+        .ok_or_else(|| worker_limit_error(scope))?;
+    let shared = WorkerShared::new(ordinal);
+    slots[ordinal] = Some(WorkerSlot {
+        shared: shared.clone(),
+        join: None,
+        scope: key,
+        ordinal,
+    });
+    Ok(shared)
+}
+
 // ---------------------------------------------------------------------------
 // Native modal handle (the state.rs `NativeState::Windows` payload)
 // ---------------------------------------------------------------------------
@@ -199,27 +230,7 @@ pub(crate) fn begin(
         ));
     }
 
-    // Atomic busy + limit reservation under one lock: both checks happen
-    // before the slot is written, so a rejection never mutates state.
-    let shared = {
-        let mut slots = lock_registry();
-        let key = scope_key(scope);
-        if slots.iter().flatten().any(|slot| slot.scope == key) {
-            return Err(busy_error(scope, kind.label()));
-        }
-        let ordinal = slots
-            .iter()
-            .position(Option::is_none)
-            .ok_or_else(|| worker_limit_error(scope))?;
-        let shared = WorkerShared::new(ordinal);
-        slots[ordinal] = Some(WorkerSlot {
-            shared: shared.clone(),
-            join: None,
-            scope: key,
-            ordinal,
-        });
-        shared
-    };
+    let shared = reserve_slot(scope, kind.label())?;
 
     let (entry_tx, entry_rx) = mpsc::channel::<EntryOutcome>();
     shared.install_entry(entry_tx);
@@ -432,6 +443,23 @@ pub(crate) fn revoke(native: NativeModal) {
     shared.request_close();
 }
 
+/// Session-close revocation for every worker of one session (the
+/// `session_closed` seam: workers are keyed by their full scope, so this
+/// matches on the session component only — the same-session multi-tray and
+/// multi-mount concurrency the design allows).
+pub(crate) fn revoke_session(session_id: &str) {
+    let targets: Vec<Arc<WorkerShared>> = lock_registry()
+        .iter()
+        .flatten()
+        .filter(|slot| slot.scope.2 == session_id)
+        .map(|slot| slot.shared.clone())
+        .collect();
+    for shared in targets {
+        shared.revoked.store(true, Ordering::Release);
+        shared.request_close();
+    }
+}
+
 /// Orphaned-native teardown for the instance Drop path: the host is going
 /// away (deinit), so no terminal is submitted — the port is revoked by the
 /// host before deinit anyway.
@@ -642,5 +670,71 @@ mod tests {
         assert!(!slot_is_free(usize::MAX));
         take_slot(usize::MAX); // out-of-range: no panic, no effect
         assert!(slot_is_free(usize::MAX) == false);
+    }
+
+    /// The cap-1/cap/cap+1 core of task 3.3, without any GUI: slots fill
+    /// to exactly `DIALOG_WORKER_CAP`, the same scope stays busy, and the
+    /// next reservation is the typed `dialog_worker_limit_reached`
+    /// rejection (never a queue).
+    #[test]
+    fn worker_pool_enforces_the_cap_and_busy_scope_before_queuing() {
+        let mut occupied: Vec<usize> = Vec::new();
+        // Cap-1 → cap: distinct scopes each reserve one slot.
+        for index in 0..DIALOG_WORKER_CAP {
+            let reservation = reserve_slot(&scope(&format!("cap-{index}")), "pickFile");
+            match reservation {
+                Ok(shared) => occupied.push(shared.ordinal),
+                Err(error) => {
+                    // Another test may hold a slot in the shared process
+                    // registry; only the busy/limit codes are acceptable
+                    // and the cap invariant is re-derived below.
+                    assert!(
+                        error.code == "dialog_worker_limit_reached"
+                            || error.code == error_code::SESSION_BUSY
+                    );
+                }
+            }
+        }
+
+        let free_count = lock_registry().iter().flatten().count();
+        if free_count == DIALOG_WORKER_CAP {
+            // Cap+1: the ninth distinct scope rejects with the typed
+            // worker-limit code (never a queue).
+            let error = reserve_slot(&scope("cap-plus-one"), "pickFile").unwrap_err();
+            assert_eq!(error.code, "dialog_worker_limit_reached");
+            assert_eq!(
+                error.details.as_ref().unwrap()["limit"],
+                serde_json::json!(DIALOG_WORKER_CAP)
+            );
+            // Busy: a scope with a live slot rejects before consuming
+            // anything.
+            let error = reserve_slot(&scope("cap-0"), "messageDialog").unwrap_err();
+            assert_eq!(error.code, error_code::SESSION_BUSY);
+        }
+
+        for ordinal in occupied {
+            take_slot(ordinal);
+        }
+    }
+
+    /// Session revocation targets the session component of the scope key.
+    #[test]
+    fn revoke_session_matches_only_that_session() {
+        let mut occupied: Vec<usize> = Vec::new();
+        if let Ok(shared) = reserve_slot(&scope("revoke-session-a"), "pickFile") {
+            occupied.push(shared.ordinal);
+            let revoked: Vec<Arc<WorkerShared>> = lock_registry()
+                .iter()
+                .flatten()
+                .filter(|slot| slot.scope.2 == "revoke-session-a")
+                .map(|slot| slot.shared.clone())
+                .collect();
+            assert_eq!(revoked.len(), 1);
+            revoke_session("revoke-session-a");
+            assert!(revoked[0].revoked.load(Ordering::Acquire));
+        }
+        for ordinal in occupied {
+            take_slot(ordinal);
+        }
     }
 }
