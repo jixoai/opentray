@@ -90,7 +90,7 @@ pub struct EmbeddedExtensionManifest {
 /// scalars, and arrays fail deserialization so the synchronous error frame
 /// and deferred terminal payloads accept exactly the same language
 /// (add-ext-dialog 7.5; impl review R2).
-fn deserialize_details_object<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+pub(crate) fn deserialize_details_object<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
