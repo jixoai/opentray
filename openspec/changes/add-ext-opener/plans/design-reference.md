@@ -58,8 +58,12 @@ scheme 处理器注册表有持久化驻留与意外副作用面；严格列表�
 `opener_target_invalid`）。win32 经 `ShellExecuteW("open", "explorer.exe", "/select,<path>")`
 单参数传参，**安全契约（冻结的拒绝集合——拒绝而非转义，转义矩阵是持续攻击面）**：路径含
 `"` 引号、NUL、或任一 C0 控制字符（0x00–0x1F）→ typed `opener_target_invalid`
-（reason:"path-control-char" / "path-quote"）；**尾随反斜杠在传参前裁剪一个**（`explorer /select`
-对尾反斜杠有历史解析缺陷；裁剪不改变定位语义）；UNC 路径合法（explorer 原生支持）。
+（reason:"path-control-char" / "path-quote"）。**尾随分隔符裁剪律（含根路径边界，冻结）**：
+仅当裁剪后仍是合法绝对路径时才裁一个尾随分隔符（`C:\foo\`→`C:\foo`、`/foo/`→`/foo`）；
+**根路径（`C:\`、`/`、UNC 根 `\\server\share\`）不裁剪**——裁剪会漂移为 drive-relative
+（`C:`）或空串；根路径的 reveal 语义为「打开该根」：win32 直接 `explorer <root>`（不带
+`/select`），darwin `activateFileViewerSelecting([根URL])` 按平台原生根语义执行。UNC 非根
+路径合法（explorer 原生支持）。
 darwin `NSWorkspace.activateFileViewerSelecting([url])`（无参数注入面）。
 **win32 `open` 受理语义（冻结）**：`ShellExecuteW` 返回值 **> 32** = 受理成功（resolve）；
 **≤ 32** = 失败 → typed `opener_failed`（details: {shellExecuteResult: <int>}，并按系统
