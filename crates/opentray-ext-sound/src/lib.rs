@@ -553,6 +553,19 @@ mod tests {
         (code, events, disposition)
     }
 
+    /// The ABI error-detail slot is process-global; tests that dispatch a
+    /// rejection and then assert `take_error_detail` must serialize their
+    /// whole body, or a parallel harness thread's rejection can overwrite
+    /// (or consume) the detail between this test's dispatch and its take.
+    static ERROR_SLOT_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_error_slot_tests()
+    -> std::sync::MutexGuard<'static, ()> {
+        ERROR_SLOT_TESTS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn take_error_detail() -> opentray_spec::ExtensionErrorDetail {
         let mut output = ExtOwnedBytes {
             ptr: ptr::null_mut(),
@@ -571,6 +584,7 @@ mod tests {
 
     #[test]
     fn exports_embedded_artifact_identity() {
+        let _slot = lock_error_slot_tests();
         let mut output = ExtOwnedBytes {
             ptr: ptr::null_mut(),
             len: 0,
@@ -593,6 +607,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn get_backend_answers_immediate_with_the_frozen_darwin_dto() {
+        let _slot = lock_error_slot_tests();
         let instance = init_instance();
         let envelope = command_envelope(serde_json::json!({ "type": "getBackend" }));
         let (code, events, disposition) = dispatch(instance, &envelope);
@@ -620,6 +635,7 @@ mod tests {
 
     #[test]
     fn invalid_commands_reject_with_a_zeroed_disposition() {
+        let _slot = lock_error_slot_tests();
         let instance = init_instance();
         // Unknown command type.
         let envelope = command_envelope(serde_json::json!({ "type": "nonsense" }));
@@ -654,6 +670,7 @@ mod tests {
 
     #[test]
     fn play_without_command_scope_rejects_before_any_state_change() {
+        let _slot = lock_error_slot_tests();
         let instance = init_instance();
         let envelope = CString::new(
             serde_json::json!({
@@ -678,6 +695,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn darwin_play_commands_off_the_owner_thread_reject_with_the_thread_category() {
+        let _slot = lock_error_slot_tests();
         let instance = init_instance();
         for data in [
             serde_json::json!({ "type": "beep", "kind": "warning" }),
@@ -697,6 +715,7 @@ mod tests {
 
     #[test]
     fn session_closed_reports_empty_events_for_an_idle_session() {
+        let _slot = lock_error_slot_tests();
         let instance = init_instance();
         let session_id = c"session-1";
         let mut events = ExtOwnedBytes {
@@ -741,6 +760,7 @@ mod tests {
 
     #[test]
     fn null_instance_commands_reject_without_touching_state() {
+        let _slot = lock_error_slot_tests();
         let mut events = ExtOwnedBytes {
             ptr: ptr::null_mut(),
             len: 0,

@@ -699,6 +699,19 @@ mod tests {
         (code, events, disposition)
     }
 
+    /// The ABI error-detail slot is process-global; tests that dispatch a
+    /// rejection and then assert `take_error_detail` must serialize their
+    /// whole body, or a parallel harness thread's rejection can overwrite
+    /// (or consume) the detail between this test's dispatch and its take.
+    static ERROR_SLOT_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_error_slot_tests()
+    -> std::sync::MutexGuard<'static, ()> {
+        ERROR_SLOT_TESTS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn take_error_detail() -> opentray_spec::ExtensionErrorDetail {
         let mut output = ExtOwnedBytes {
             ptr: ptr::null_mut(),
@@ -717,6 +730,7 @@ mod tests {
 
     #[test]
     fn exports_embedded_artifact_identity() {
+        let _slot = lock_error_slot_tests();
         let mut output = ExtOwnedBytes {
             ptr: ptr::null_mut(),
             len: 0,
@@ -738,6 +752,7 @@ mod tests {
 
     #[test]
     fn poll_outcome_layout_is_frozen() {
+        let _slot = lock_error_slot_tests();
         use std::mem::{offset_of, size_of};
         assert_eq!(EXT_SYMBOL_POLL_OWNER_V1, "opentray_ext_poll_owner_v1");
         assert_eq!(EXT_POLL_STATUS_PENDING, 0);
@@ -765,6 +780,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn get_backend_answers_immediate_with_the_frozen_darwin_dto() {
+        let _slot = lock_error_slot_tests();
         let instance = init_instance();
         let envelope = command_envelope(serde_json::json!({ "type": "getBackend" }));
         let (code, events, disposition) = dispatch(instance, &envelope);
@@ -793,6 +809,7 @@ mod tests {
 
     #[test]
     fn invalid_commands_reject_with_the_typed_code_and_zeroed_disposition() {
+        let _slot = lock_error_slot_tests();
         let instance = init_instance();
         // Unknown command type.
         let envelope = command_envelope(serde_json::json!({ "type": "nonsense" }));
@@ -822,6 +839,7 @@ mod tests {
 
     #[test]
     fn show_without_command_scope_rejects_before_any_state_change() {
+        let _slot = lock_error_slot_tests();
         let instance = init_instance();
         let envelope = CString::new(
             serde_json::json!({
@@ -843,6 +861,7 @@ mod tests {
     /// observable on any harness thread.
     #[test]
     fn busy_registry_scopes_the_second_show_to_a_typed_rejection() {
+        let _slot = lock_error_slot_tests();
         use opentray_spec::CommandScope;
 
         let instance = init_instance();
@@ -872,6 +891,7 @@ mod tests {
 
     #[test]
     fn poll_owner_for_unknown_handles_reports_no_deadline() {
+        let _slot = lock_error_slot_tests();
         let instance = init_instance();
         let outcome = unsafe { opentray_ext_poll_owner_v1(instance, 0xdead_beef) };
         assert_eq!(outcome.status, EXT_POLL_STATUS_PENDING);
@@ -890,6 +910,7 @@ mod tests {
     /// end-to-end on the main thread by the modal probe (task 3.1).
     #[test]
     fn session_cleanup_removes_modals_and_never_double_submits() {
+        let _slot = lock_error_slot_tests();
         use opentray_spec::CommandScope;
 
         static SUBMIT_CALLS: Mutex<Vec<u64>> = Mutex::new(Vec::new());
@@ -956,6 +977,7 @@ mod tests {
 
     #[test]
     fn deferred_port_attach_rejects_mismatched_port_identity() {
+        let _slot = lock_error_slot_tests();
         unsafe extern "C" fn ok_submit(
             _a: *mut c_void,
             _b: u64,
@@ -988,6 +1010,7 @@ mod tests {
     /// exactly once per load).
     #[test]
     fn deferred_port_attach_accepts_the_validated_copy() {
+        let _slot = lock_error_slot_tests();
         unsafe extern "C" fn submit_ok(
             _port_data: *mut c_void,
             _handle: u64,
