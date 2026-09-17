@@ -467,6 +467,65 @@ pub const EXT_ERR_OVERSIZED: ExtResultCode = 6; // frozen (add-ext-dialog design
 /// foreign owner. No queue mutation and no terminal frame.
 pub const EXT_ERR_INVALID_HANDLE: ExtResultCode = 7; // frozen (add-ext-dialog design section 5.1)
 
+// ---------------------------------------------------------------------------
+// Dialog poll-owner ABI (add-ext-dialog design sections 5.2/5.7 ruling 3,
+// frozen batch B 2026-09-17).
+//
+// A dynamic extension may export ONE optional producer symbol the broker's
+// owner loop uses to step native modal state without blocking: scheduling
+// authority stays broker-owned (`ControlFlow::WaitUntil(min deadline)`), the
+// extension holds no waker and never calls into the loop, and a poll NEVER
+// carries a terminal — the deferred port stays the single terminal channel.
+// ---------------------------------------------------------------------------
+
+/// The optional poll-producer symbol (frozen name, design section 5.7
+/// ruling 3). Absence is a legitimate matrix cell: the instance is never
+/// scheduled.
+pub const EXT_SYMBOL_POLL_OWNER_V1: &str = "opentray_ext_poll_owner_v1";
+
+/// `ExtPollOutcomeV1::status`: the only frozen status — the operation is
+/// pending and its terminal (if any) went through the deferred port.
+pub const EXT_POLL_STATUS_PENDING: u32 = 0;
+
+/// `ExtPollOutcomeV1::next_deadline_ms` sentinel: nothing scheduled; the
+/// loop should not arm a timer for this owner.
+pub const EXT_POLL_NO_DEADLINE_MS: u64 = u64::MAX;
+
+/// `ExtPollOutcomeV1::wake_flags` bit: this poll completed a modal and
+/// submitted its terminal through the deferred port (the port wake already
+/// requested a drain; the flag is a diagnostic hint for the scheduler).
+pub const EXT_POLL_OUTCOME_FLAG_TERMINAL_QUEUED: u32 = 1 << 0;
+
+/// Frozen poll outcome (design section 5.7 ruling 3): `status` and
+/// `reserved` are leading u32s, `next_deadline_ms` is a RELATIVE millisecond
+/// duration from the poll call (u64::MAX = none), and `wake_flags` carries
+/// hint bits. Any drift is an ABI break requiring a new versioned struct.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ExtPollOutcomeV1 {
+    pub status: u32,
+    pub reserved: u32,
+    pub next_deadline_ms: u64,
+    pub wake_flags: u32,
+}
+
+impl ExtPollOutcomeV1 {
+    pub fn pending(next_deadline_ms: u64, wake_flags: u32) -> Self {
+        Self {
+            status: EXT_POLL_STATUS_PENDING,
+            reserved: 0,
+            next_deadline_ms,
+            wake_flags,
+        }
+    }
+}
+
+/// Exported by poll-producer extensions (optional symbol): steps one
+/// deferred operation's native owner once on the caller's (owner-loop)
+/// thread.
+pub type ExtPollOwnerV1Fn =
+    unsafe extern "C" fn(instance: *mut c_void, operation_handle: u64) -> ExtPollOutcomeV1;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionScope {
@@ -510,6 +569,40 @@ pub struct ExtensionEnvelope {
 mod tests {
     use super::*;
     use std::mem::{offset_of, size_of};
+
+    /// Freezes the dialog poll-owner C layout (add-ext-dialog design
+    /// section 5.7 ruling 3): leading u32 pair, u64 relative deadline
+    /// (u64::MAX = none), trailing wake-flags word, padded to the u64
+    /// alignment. Any drift is an ABI break requiring a new versioned
+    /// struct.
+    #[test]
+    fn poll_owner_v1_layout_is_frozen() {
+        assert_eq!(EXT_SYMBOL_POLL_OWNER_V1, "opentray_ext_poll_owner_v1");
+        assert_eq!(EXT_POLL_STATUS_PENDING, 0);
+        assert_eq!(EXT_POLL_NO_DEADLINE_MS, u64::MAX);
+        assert_eq!(EXT_POLL_OUTCOME_FLAG_TERMINAL_QUEUED, 1);
+
+        assert_eq!(
+            size_of::<ExtPollOutcomeV1>(),
+            3 * size_of::<u64>(),
+            "status + reserved + deadline word + wake_flags, padded to the u64 alignment"
+        );
+        assert_eq!(offset_of!(ExtPollOutcomeV1, status), 0);
+        assert_eq!(offset_of!(ExtPollOutcomeV1, reserved), size_of::<u32>());
+        assert_eq!(
+            offset_of!(ExtPollOutcomeV1, next_deadline_ms),
+            size_of::<u64>()
+        );
+        assert_eq!(
+            offset_of!(ExtPollOutcomeV1, wake_flags),
+            2 * size_of::<u64>()
+        );
+        let pending = ExtPollOutcomeV1::pending(16, EXT_POLL_OUTCOME_FLAG_TERMINAL_QUEUED);
+        assert_eq!(pending.status, EXT_POLL_STATUS_PENDING);
+        assert_eq!(pending.reserved, 0);
+        assert_eq!(pending.next_deadline_ms, 16);
+        assert_eq!(pending.wake_flags, EXT_POLL_OUTCOME_FLAG_TERMINAL_QUEUED);
+    }
 
     /// The typed-error `details` field accepts exactly one language on both
     /// the synchronous error frame and deferred terminal payloads: absent or
