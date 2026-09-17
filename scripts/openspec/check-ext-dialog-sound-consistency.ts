@@ -8,7 +8,7 @@
 //    impossible identity order, and fictional two-session scenarios.
 // 3. Keep the gate runnable via `bun run verify:spec-consistency` and covered by fixture tests.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 
@@ -90,10 +90,36 @@ const collect = (dir: string): string[] => {
   return out;
 };
 
+const resolveChangeDir = (change: string): string | null => {
+  const active = join(ROOT, change);
+  if (existsSync(active)) {
+    return active;
+  }
+  // Archived changes keep their normative artifacts under
+  // openspec/changes/archive/<date>-<name>/; the gate keeps scanning them
+  // there so an archive step can never break CI.
+  const archiveRoot = join(ROOT, "openspec/changes/archive");
+  if (existsSync(archiveRoot)) {
+    const base = change.split("/").pop() ?? change;
+    const match = readdirSync(archiveRoot)
+      .filter((entry) => entry.endsWith(`-${base}`))
+      .sort()
+      .at(-1);
+    if (match !== undefined) {
+      return join(archiveRoot, match);
+    }
+  }
+  return null;
+};
+
 const runOnRepo = (): string[] => {
   const violations: string[] = [];
   for (const change of CHANGES) {
-    for (const file of collect(join(ROOT, change))) {
+    const dir = resolveChangeDir(change);
+    if (dir === null) {
+      continue;
+    }
+    for (const file of collect(dir)) {
       violations.push(
         ...checkDocument(file.slice(ROOT.length), readFileSync(file, "utf8"))
       );
