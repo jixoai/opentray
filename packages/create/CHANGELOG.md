@@ -1,5 +1,13 @@
 # create-opentray
 
+## 0.29.0
+
+### Patch Changes
+
+- @opentray/spec@0.29.0
+- @opentray/packaging@0.29.0
+- @opentray/vite-plugin@0.29.0
+
 ## 0.28.0
 
 ### Patch Changes
