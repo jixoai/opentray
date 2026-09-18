@@ -44,8 +44,8 @@
 
 - [x] 6.1 双平台真机验收：read/write/clear 往返（进程外可观察）；null 空态；writeText('') 与 clear() 语义分立；getBackend DTO 上报。
   - 证据：darwin 本机 clipboard_probe（ffd256c9）——emoji（代理对）往返、空串写读回 ""、清后读回 null、进程外 `pbpaste` 观察 marker 与清空；Windows 真机 honor（26/26 + probe 全矩阵 + 跨进程：进程 A 写 marker → 进程 B `read` 模式读回）。锁竞态族由 spy 确定性单测覆盖（sound 先例同构）。**真机抓到并修复法则级缺陷**：空板 GetClipboardData NULL+1168 误判 unavailable → oracle 修复后 clear→read 一等 null（30f3b276）。注：ssh 会话 PowerShell Get-Clipboard 读取不可靠（session 0），跨进程以探针第二进程读为准。
-- [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check；真实 pack 证据。
-  - 待本 PR CI run（含 8a572dd4 新增 workspace-verify 门）全绿后回填链接。
+- [x] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check；真实 pack 证据。
+  - 证据：GitHub Actions run 35303325775（PR #9，commit 487b3ea1）全绿——workspace-verify（spec 门+脚本套件+cargo 全仓+typecheck+全包测试）+ 34-job 原生矩阵（8 组件 ×4 目标，三新扩展 12 job 含 manifest/identity 检查）+ stage/pack；pack-size 与解包 identity 证据由同 run 的 stage-and-pack 产出。
 
 ## 7. Release
 

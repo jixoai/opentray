@@ -47,8 +47,8 @@
 
 - [x] 6.1（命令面腿）双平台命令面/授权面/payload 矩阵/DTO：darwin 34/34×5（含 ABI 往返与 ERROR_SLOT 互斥）；Windows 真机 31/31（auth-only 腿 + spy）；win32 气球桥真通道证据见 opentray-bin 137 darwin / 122 Windows（HOST_CAPABILITY_ROUTES + 托盘桥 + grep-gate）。getBackend DTO 双平台构造器 fixture 冻结。
   - （GUI 腿）通知横幅实际出现 / darwin 授权弹窗首次出现 / 气球外观（Win10 前经典样式）属交互面，列 Owner 真机清单；命令受理与 typed 载荷已由探针/测试面覆盖。
-- [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check + 真实 pack 证据。
-  - 待本 PR CI run（含 workspace-verify 门）全绿后回填链接。
+- [x] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check + 真实 pack 证据。
+  - 证据：GitHub Actions run 35303325775（PR #9，commit 487b3ea1）全绿——workspace-verify（spec 门+脚本套件+cargo 全仓+typecheck+全包测试）+ 34-job 原生矩阵（8 组件 ×4 目标，三新扩展 12 job 含 manifest/identity 检查）+ stage/pack；pack-size 与解包 identity 证据由同 run 的 stage-and-pack 产出。
 
 ## 7. Release
 

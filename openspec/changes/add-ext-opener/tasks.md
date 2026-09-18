@@ -44,8 +44,8 @@
 
 - [x] 6.1 darwin 真机验收（opener_probe，本机 2026-09-18）：open(https) 默认浏览器受理、open(绝对文件) 默认应用受理、reveal Finder 定位（真实桌面动作）、blocked scheme typed（details {scheme:"ftp"}）、relative typed（{reason:"relative"}）、path-quote 拒（{reason:"path-quote"}）、getBackend DTO 由 lib fixture 冻结。Windows：命令面/参数形态/spy 矩阵真机 28/28 绿；GUI 可见动作（浏览器/资源管理器弹出）在 ssh session 0 下不可见，列 Owner 真机清单。
   - 证据：opener_probe 六行输出（3 ok + 3 err 载荷精确）；cargo 26/26 darwin、28/28 Windows。
-- [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check + 真实 pack 证据。
-  - 待本 PR CI run（含 workspace-verify 门）全绿后回填链接。
+- [x] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check + 真实 pack 证据。
+  - 证据：GitHub Actions run 35303325775（PR #9，commit 487b3ea1）全绿——workspace-verify（spec 门+脚本套件+cargo 全仓+typecheck+全包测试）+ 34-job 原生矩阵（8 组件 ×4 目标，三新扩展 12 job 含 manifest/identity 检查）+ stage/pack；pack-size 与解包 identity 证据由同 run 的 stage-and-pack 产出。
 
 ## 7. Release
 
