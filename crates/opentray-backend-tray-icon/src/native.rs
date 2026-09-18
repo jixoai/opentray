@@ -68,6 +68,32 @@ impl NativeTrayIconRuntime {
     }
 }
 
+// Win32 Shell_NotifyIcon addressing for broker composition only: the same
+// (HWND, uID) registration pair the runtime itself used at NIM_ADD. This is a
+// read-only projection of live native state — it never creates, modifies, or
+// removes a tray icon, and callers that need shell semantics beyond addressing
+// own those operations themselves.
+#[cfg(target_os = "windows")]
+impl NativeTrayIconRuntime {
+    /// Resolves the live `(HWND, uID)` shell-registration identity of one tray
+    /// icon, keyed by the app surface and the PROJECTED `tray_icon_id` (the
+    /// projection compiler's id, not the logical tray id — derive it with
+    /// [`crate::stable_tray_icon_id`]). `None` means no live native icon is
+    /// registered for that pair. Must be called on the owner-loop thread (the
+    /// same thread law as every runtime method).
+    pub fn win32_tray_registration(
+        &self,
+        app_id: &AppId,
+        tray_icon_id: &str,
+    ) -> Option<(isize, u32)> {
+        self.surfaces
+            .borrow()
+            .get(app_id)
+            .and_then(|surface| surface.icons.get(tray_icon_id))
+            .map(|icon| (icon.window_handle() as isize, icon.registration_id()))
+    }
+}
+
 impl TrayIconRuntime for NativeTrayIconRuntime {
     fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
         #[cfg(target_os = "macos")]

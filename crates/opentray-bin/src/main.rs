@@ -686,9 +686,23 @@ mod native_broker {
             operations.clone(),
         );
 
+        // Typed side-channel registered at broker construction (win32
+        // tray-notification channel addressing): one shared runtime handle is
+        // cloned between the kernel's TrayIconBackend and the composition
+        // HostServices, so the channel source reads live (HWND, uID)
+        // registrations of the exact runtime the kernel projects through —
+        // never a notification-specific method on the AppBackend trait. The
+        // RefCell interior keeps the owner-loop-thread law: both holders live
+        // on the winit owner loop, as before.
+        let tray_runtime = Arc::new(NativeTrayIconRuntime::new());
+        #[cfg(target_os = "windows")]
+        let host_services = HostServices::new(tray_runtime.clone());
+        #[cfg(not(target_os = "windows"))]
+        let host_services = HostServices::new();
+
         let mut app = NativeBrokerApp {
             broker: BrokerKernel::with_default_app_options_and_operations(
-                TrayIconBackend::with_runtime(NativeTrayIconRuntime::new()),
+                TrayIconBackend::with_runtime(tray_runtime.clone()),
                 DynamicExtensionLoader::from_env(event_hub.clone(), deferred_hub.clone())?,
                 options.default_app_options(),
                 options.broker_artifact_identity().clone(),
@@ -697,7 +711,7 @@ mod native_broker {
             extension_events: ExtensionEventRouter::new(),
             event_hub,
             deferred_hub,
-            host_services: HostServices::new(),
+            host_services,
             dialog_polls: PollScheduler::new(),
             sessions: HashMap::new(),
             broker_version: options.package_version.clone(),
@@ -728,7 +742,8 @@ mod native_broker {
     }
 
     struct NativeBrokerApp {
-        broker: BrokerKernel<TrayIconBackend<NativeTrayIconRuntime>, DynamicExtensionLoader>,
+        broker:
+            BrokerKernel<TrayIconBackend<Arc<NativeTrayIconRuntime>>, DynamicExtensionLoader>,
         extension_events: ExtensionEventRouter,
         event_hub: EventHub,
         deferred_hub: DeferredPortHub,

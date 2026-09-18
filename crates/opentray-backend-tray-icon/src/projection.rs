@@ -540,7 +540,17 @@ fn menu_entry(
     }
 }
 
-pub(crate) fn stable_tray_icon_id(app_id: &str, tray_id: &str) -> String {
+/// The neutral logical→projected tray identity lookup.
+///
+/// The projection compiler derives every native tray-icon key from the
+/// kernel-logical `(app_id, tray_id)` pair: the mapping is a total, injective,
+/// deterministic function (the projected id is NOT the raw tray id — the app id
+/// participates and `%`, `:`, `/` are percent-encoded), and
+/// [`TrayIconProjection`] applies it unchanged when keying native icons.
+/// Broker composition that must address a live native icon for a logical tray
+/// (for example reading the win32 `(HWND, uID)` registration) re-derives the
+/// same key through this function instead of duplicating the format.
+pub fn stable_tray_icon_id(app_id: &str, tray_id: &str) -> String {
     format!(
         "opentray-tray:{}:{}",
         encode_component(app_id),
@@ -904,6 +914,54 @@ mod tests {
                 x: 10,
                 y: 20,
             })
+        );
+    }
+
+    #[test]
+    fn stable_tray_icon_id_is_the_total_derivation_the_projection_applies() {
+        // The neutral composition lookup must reproduce exactly the key the
+        // projection compiler assigns (reserved characters percent-encoded,
+        // app id participating), for any logical identity — including ones
+        // whose raw ids would collide under a naive join.
+        let projection = TrayIconProjection::from_app_projection(&AppProjection {
+            app: AppRef {
+                app_id: "surface:1".to_string(),
+            },
+            title: None,
+            tooltip: None,
+            app_icon: None,
+            trays: vec![TrayProjection {
+                tray_id: "tray/a".to_string(),
+                title: "Tray".to_string(),
+                tooltip: None,
+                icon: icon(),
+                menu: None,
+            }],
+        })
+        .expect("projection");
+
+        assert_eq!(
+            stable_tray_icon_id("surface:1", "tray/a"),
+            projection.trays[0].tray_icon_id
+        );
+        assert_eq!(
+            projection.trays[0].tray_icon_id,
+            "opentray-tray:surface%3A1:tray%2Fa"
+        );
+        // Encoding is injective: component swaps and separator injections
+        // cannot alias two logical identities onto one projected id.
+        assert_ne!(stable_tray_icon_id("a", "t"), stable_tray_icon_id("t", "a"));
+        assert_ne!(
+            stable_tray_icon_id("a:b", "c"),
+            stable_tray_icon_id("a", "b:c")
+        );
+        assert_ne!(
+            stable_tray_icon_id("a%3Ab", "c"),
+            stable_tray_icon_id("a:b", "c")
+        );
+        assert_ne!(
+            stable_tray_icon_id("a%3Ab", "c"),
+            stable_tray_icon_id("a%253Ab", "c")
         );
     }
 

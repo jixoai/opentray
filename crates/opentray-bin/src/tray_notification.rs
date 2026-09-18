@@ -15,6 +15,10 @@
 // 4. Keep every native dependency behind two injectable seams (channel
 //    source + notify-icon invoker) so the bridge is fully testable on any
 //    host and the win32 production adapters are thin, auditable shells.
+// 5. Reach the backend runtime through a typed, downcast-free side channel:
+//    one Arc<NativeTrayIconRuntime> handle registered at broker construction
+//    is shared between the kernel's TrayIconBackend and the channel source —
+//    never a notification-specific method on the AppBackend trait.
 // Compromise: the bridge is broker composition (design law:
 // opentray-core stays product-neutral), so it cannot live beside the kernel
 // dispatch it bypasses; the neutral mirror of NOTIFYICONDATAW's NIF_INFO
@@ -95,6 +99,25 @@ pub(crate) trait NotifyIconInvoker {
     fn modify_info(&self, data: &TrayNotifyIconData) -> Result<(), u32>;
 }
 
+/// Scope→channel resolution core (host-neutral): the composition pre-dispatch
+/// has already validated the kernel's LOGICAL tray registry for the scope, so
+/// this projects the logical `(appId, trayId)` onto the tray backend's
+/// projected tray-icon id (the projection compiler's neutral derivation) and
+/// reads the native registration through the supplied lookup — the win32
+/// production lookup is `NativeTrayIconRuntime::win32_tray_registration`.
+/// `None` is the typed `notification_tray_absent` path (no live registered
+/// icon for the projected pair).
+#[cfg(any(target_os = "windows", test))]
+fn resolve_tray_channel(
+    scope: &CommandScope,
+    registration: impl FnOnce(&opentray_spec::AppId, &str) -> Option<(isize, u32)>,
+) -> Option<TrayIconChannel> {
+    let tray_icon_id =
+        opentray_backend_tray_icon::stable_tray_icon_id(&scope.app_id, &scope.tray_id);
+    let (hwnd, u_id) = registration(&scope.app_id, &tray_icon_id)?;
+    Some(TrayIconChannel { hwnd, u_id })
+}
+
 /// The bridge's composition-owned service pair.
 pub(crate) struct TrayNotificationSeam {
     channels: Box<dyn TrayNotificationChannelSource>,
@@ -103,17 +126,23 @@ pub(crate) struct TrayNotificationSeam {
 
 impl TrayNotificationSeam {
     /// Production seam per platform. Win32 wires the real Shell_NotifyIconW
-    /// invoker; other platforms register no routes, so their inert pair is
-    /// never consulted.
+    /// invoker plus the channel source that reads the shared tray-backend
+    /// runtime handle registered at broker construction; other platforms
+    /// register no routes, so their inert pair is never consulted.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn compose_native(
+        tray_runtime: std::sync::Arc<opentray_backend_tray_icon::NativeTrayIconRuntime>,
+    ) -> Self {
+        Self {
+            channels: Box::new(NativeTrayChannelSource { tray_runtime }),
+            invoker: Box::new(ShellNotifyIconInvoker),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
     pub(crate) fn compose_native() -> Self {
         Self {
-            #[cfg(target_os = "windows")]
-            channels: Box::new(NativeTrayChannelSource),
-            #[cfg(not(target_os = "windows"))]
             channels: Box::new(InertChannelSource),
-            #[cfg(target_os = "windows")]
-            invoker: Box::new(ShellNotifyIconInvoker),
-            #[cfg(not(target_os = "windows"))]
             invoker: Box::new(InertInvoker),
         }
     }
@@ -327,7 +356,7 @@ impl NotifyIconInvoker for InertInvoker {
 mod native {
     use super::{
         NotifyIconInvoker, TrayNotificationChannelSource, TrayIconChannel, TrayNotifyIconData,
-        NIF_INFO, NIM_MODIFY,
+        resolve_tray_channel, NIF_INFO, NIM_MODIFY,
     };
     use opentray_spec::CommandScope;
     use windows_sys::Win32::Foundation::GetLastError;
@@ -361,25 +390,25 @@ mod native {
         }
     }
 
-    /// Production win32 channel source. The composition pre-dispatch has
-    /// already validated the kernel's logical tray registry and session
-    /// ownership; projecting the native (HWND, uID) registration identity
-    /// requires the tray backend runtime to expose its native tray-icon
-    /// handles to broker composition. That accessor does not exist yet
-    /// (cross-crate seam reported with this change), so until it lands this
-    /// source answers the typed absent path with a broker-log diagnostic
-    /// naming the gap — it never fabricates a channel or a second icon.
-    pub(super) struct NativeTrayChannelSource;
-
+    /// Production win32 channel source: resolves the scope's tray icon through
+    /// the shared tray-backend runtime handle registered at broker
+    /// construction (a typed, downcast-free side-channel — composition
+    /// addressing only, never a notification-specific method on `AppBackend`).
+    /// The composition pre-dispatch has already validated the kernel's logical
+    /// tray registry and session ownership, so this projects the logical
+    /// `(appId, trayId)` onto the backend's projected tray-icon id and reads
+    /// the live `(HWND, uID)` registration. `None` keeps the typed
+    /// `notification_tray_absent` path for genuinely missing icons — this
+    /// source never fabricates a channel or a second icon registration.
+    pub(super) struct NativeTrayChannelSource {
+        pub(super) tray_runtime: std::sync::Arc<opentray_backend_tray_icon::NativeTrayIconRuntime>,
+    }
     impl TrayNotificationChannelSource for NativeTrayChannelSource {
         fn channel_for(&self, scope: &CommandScope) -> Option<TrayIconChannel> {
-            eprintln!(
-                "opentray tray-notification: the tray backend runtime does not yet project its \
-                 native (HWND, uID) tray icon registration to broker composition; cannot resolve \
-                 the channel for app {} tray {}; answering the typed absent path",
-                scope.app_id, scope.tray_id
-            );
-            None
+            resolve_tray_channel(scope, |app_id, tray_icon_id| {
+                self.tray_runtime
+                    .win32_tray_registration(app_id, tray_icon_id)
+            })
         }
     }
 }
@@ -398,11 +427,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use opentray_core::{
-        AppBackend, AppProjection, BackendCapabilities, BackendError, BrokerKernel,
+        AppBackend, AppProjection, BackendCapabilities, BackendError, BrokerKernel, TrayProjection,
     };
     use opentray_spec::{
-        AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget, ClientFrame, Rect, ServerFrame,
-        TrayEvent, PROTOCOL_VERSION,
+        AppOptions, AppRef, BrokerArtifactIdentity, BrokerArtifactTarget, ClientFrame, Icon, Rect,
+        ServerFrame, TrayEvent, PROTOCOL_VERSION,
     };
 
     use super::*;
@@ -665,6 +694,69 @@ mod tests {
             };
             assert_eq!(code, NOTIFICATION_TRAY_ABSENT);
         }
+    }
+
+    // -- Scope→channel resolution core ----------------------------------------
+
+    #[test]
+    fn scope_to_channel_resolution_projects_the_logical_tray_onto_the_registration() {
+        // Fake runtime registry keyed the way NativeTrayIconRuntime keys live
+        // icons — (app_id, PROJECTED tray_icon_id) → (HWND, uID) — and built
+        // from a real TrayIconProjection, so the test drives the exact
+        // projection law the backend applies and proves the full
+        // scope→channel path host-neutrally.
+        let projection =
+            opentray_backend_tray_icon::TrayIconProjection::from_app_projection(&AppProjection {
+                app: AppRef {
+                    app_id: "app-1".to_string(),
+                },
+                title: None,
+                tooltip: None,
+                app_icon: None,
+                trays: vec![TrayProjection {
+                    tray_id: "tray/1".to_string(),
+                    title: "Tray".to_string(),
+                    tooltip: None,
+                    icon: Some(Icon::rgba(vec![0, 0, 0, 0], 1, 1)),
+                    menu: None,
+                }],
+            })
+            .expect("projection");
+        let registrations: HashMap<(String, String), (isize, u32)> = projection
+            .trays
+            .iter()
+            .map(|tray| {
+                (
+                    (projection.app_id.clone(), tray.tray_icon_id.clone()),
+                    (CHANNEL.hwnd, CHANNEL.u_id),
+                )
+            })
+            .collect();
+        let lookup = |app_id: &opentray_spec::AppId, tray_icon_id: &str| {
+            registrations
+                .get(&(app_id.clone(), tray_icon_id.to_string()))
+                .copied()
+        };
+
+        // Full path: logical scope → projected tray-icon id → registration.
+        assert_eq!(
+            resolve_tray_channel(&scope("app-1", "tray/1", "session-1"), lookup),
+            Some(CHANNEL)
+        );
+        // A tray the runtime never registered answers the typed absent path:
+        // wrong tray and wrong app cannot resolve a channel.
+        assert_eq!(
+            resolve_tray_channel(&scope("app-1", "tray-2", "session-1"), lookup),
+            None
+        );
+        assert_eq!(
+            resolve_tray_channel(&scope("app-2", "tray/1", "session-1"), lookup),
+            None
+        );
+        // The registry is keyed by the PROJECTED id, so the raw logical tray
+        // id never matches by accident — the projection derivation is on the
+        // resolution path, not identity.
+        assert!(!registrations.contains_key(&("app-1".to_string(), "tray/1".to_string())));
     }
 
     // -- Typed failure paths -------------------------------------------------

@@ -102,8 +102,22 @@ pub(crate) struct HostServices {
 }
 
 impl HostServices {
-    /// Composition constructor: the production seam per platform. Non-win32
-    /// brokers register no routes, so their seam is never consulted.
+    /// Composition constructor: the production seam per platform. Win32 wires
+    /// the tray-notification channel source to the shared tray-backend runtime
+    /// handle registered at broker construction (the typed, downcast-free
+    /// side-channel law — the kernel's TrayIconBackend keeps applying
+    /// projections through the same runtime object). Non-win32 brokers
+    /// register no routes, so their seam is never consulted.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn new(
+        tray_runtime: std::sync::Arc<opentray_backend_tray_icon::NativeTrayIconRuntime>,
+    ) -> Self {
+        Self {
+            tray_notification: TrayNotificationSeam::compose_native(tray_runtime),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
     pub(crate) fn new() -> Self {
         Self {
             tray_notification: TrayNotificationSeam::compose_native(),
