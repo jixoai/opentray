@@ -93,6 +93,18 @@ fn require_main_thread() -> Result<MainThreadMarker, opentray_spec::TypedExtensi
 pub(crate) fn begin(kind: &ModalKind) -> Result<NativeModal, opentray_spec::TypedExtensionError> {
     let mtm = require_main_thread()?;
     let app = NSApplication::sharedApplication(mtm);
+    // Modal sessions need an ACTIVE host (issue #10): the broker runs as an
+    // unactivated Accessory-policy app between surfaces, and AppKit routes a
+    // non-active app's first (and, for Accessory apps, every) mouse click to
+    // application activation instead of the modal's buttons — runModalSession
+    // then never ends, the facade promise hangs, and the alert renders in the
+    // degenerate non-key-window form (blank button slot, suppression
+    // placeholder). Activating before the session begins makes the modal's
+    // window the key window so clicks reach the buttons; the system
+    // de-activates the app naturally after the terminal. The same family
+    // law as the Darwin carrier's app-mode aggregation: the host activation
+    // state is part of the projection, not the caller's concern.
+    app.activateIgnoringOtherApps(true);
     let (panel, session) = match kind {
         ModalKind::Message(options) => {
             let alert = build_alert(options, mtm);
