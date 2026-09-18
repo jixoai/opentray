@@ -1,7 +1,7 @@
-# add-ext-notification — Self-Review（实现阶段 + 复核轮进行中）
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>add-ext-notification self-review</title></head><body><pre style="font-family:-apple-system,monospace;white-space:pre-wrap"># add-ext-notification — Self-Review（实现阶段 + 复核轮进行中）
 
-> 评审人：编排者。对象：实现（facade + shared schema + 原生 crate + broker 桥 + 打包）。
-> 性质：**实现自评 + 复核轮记录**——I3 全链复核与 I4 综合裁决进行中，本档不代勾。
+&gt; 评审人：编排者。对象：实现（facade + shared schema + 原生 crate + broker 桥 + 打包）。
+&gt; 性质：**实现自评 + 复核轮记录**——I3 全链复核与 I4 综合裁决进行中，本档不代勾。
 
 ## 总判定
 
@@ -19,7 +19,7 @@ contract.json）。
 
 - resolve-on-acceptance；payload 界限 64/256/64 为平台无关共同契约（UTF-16 码元，
   facade preflight，绝不静默截断）；win32 subtitle 降级为
-  `subtitle + "—" + body`（em dash、无空格；无 body 时 subtitle 独立成文），
+  `subtitle + &quot;—&quot; + body`（em dash、无空格；无 body 时 subtitle 独立成文），
   拼接后 ≤256 联合校验。未知 NotifyOptions 字段 → typed
   `notification_payload_invalid` `{field}`（非 TypeError）。
 - win32 桥（O1=B 冻结）：notify 经 broker 组合层通用 capability 表（静态数据条目，
@@ -30,7 +30,7 @@ contract.json）。
   `NIIF_NOSOUND`。opentray-core 零能力词特判（core-neutrality grep 门）。
 - darwin 授权 = DeferredOperation 复用（首个非模态用例，零新 ABI 符号）：回调主线程
   hop 唤醒 owner loop；10s 超时 → `notification_failed`
-  （`reason:"authorization-timeout"`）；outcome/timeout/session-close cancel 三路
+  （`reason:&quot;authorization-timeout&quot;`）；outcome/timeout/session-close cancel 三路
   一次性 CAS 终帧。win32 两授权命令恒 Immediate（granted/true，零 deferred 帧）；
   facade 两种结算形状通吃。
 - denied 线性化：notify 受理在单 owner-loop 帧内对照缓存最近授权快照（键 =
@@ -43,7 +43,7 @@ contract.json）。
 
 - 实现复核 I3（crate+桥+缝全链）排队中；I1/I2 的家族共性缺口（getBackend ABI 往返、
   ERROR_SLOT 互斥、词法 vs 规范解析同构）在本 crate 的对应面已由既有夹具/测试覆盖
-  （getBackend {type:"backend"} 往返夹具、ERROR_SLOT_TESTS 互斥、payload 矩阵）。
+  （getBackend {type:&quot;backend&quot;} 往返夹具、ERROR_SLOT_TESTS 互斥、payload 矩阵）。
 - 卫生修正 78750e9f：Windows lib-test 三个 dead-code 警告清除（drain_hops 删除、
   parse_events cfg-gate macos、is_silent allow 门修正）——darwin 34/34、
   Windows 31/31、交叉 ×2 0 警告复验。
@@ -62,3 +62,4 @@ contract.json）。
   5a713a1c/6b5b3fc7（bin 桥 + backend 缝）+ bb5ad8b9（vendored 访问器）+
   ce3d2f41（spec + 打包注册）。
 - 复核期修正：78750e9f（dead-code 卫生）。
+</pre></body></html>
