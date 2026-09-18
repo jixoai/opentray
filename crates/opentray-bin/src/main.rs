@@ -17,6 +17,10 @@ mod dynamic_extension;
 mod event_hub;
 mod extension_events;
 mod frame_error;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod host_capabilities;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod tray_notification;
 #[cfg(unix)]
 mod unix_transport;
 #[cfg(target_os = "windows")]
@@ -25,17 +29,26 @@ mod windows_transport;
 use std::{
     env,
     error::Error,
+    path::PathBuf,
+    time::Duration,
+};
+// Darwin carrier-entry imports (app launch descriptor, spawn, log append):
+// windows/linux broker entrypoints never touch these, so they stay
+// macos-gated and the windows cross-check stays warning-free.
+#[cfg(target_os = "macos")]
+use std::{
     fs::{File, OpenOptions},
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Stdio},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use opentray_spec::{
     sanitize_caller_label, AppOptions, BrokerArtifactIdentity, BrokerArtifactTarget,
     BrokerReadyMetadata, ClientFrame, DEFAULT_CALLER_LABEL, PROTOCOL_VERSION,
 };
+#[cfg(target_os = "macos")]
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -534,8 +547,11 @@ mod native_broker {
     use opentray_core::{BrokerKernel, BrokerSession};
     use opentray_core::operations::DeferredOperationRegistry;
     use opentray_spec::{
-        AppEvent, ClientFrame, ExtensionEnvelope, ServerFrame, EXT_POLL_NO_DEADLINE_MS,
+        ClientFrame, ExtensionEnvelope, ServerFrame, EXT_POLL_NO_DEADLINE_MS,
     };
+    // The reopen-requested app event is a Darwin Dock-reopen projection.
+    #[cfg(target_os = "macos")]
+    use opentray_spec::AppEvent;
     use winit::application::ApplicationHandler;
     use winit::event::StartCause;
     use winit::event::WindowEvent;
@@ -557,6 +573,9 @@ mod native_broker {
         extension_events::{
             drain_extension_events as drain_hub_events, ExtensionDispatch, ExtensionEventRouter,
             LoadedExtension,
+        },
+        host_capabilities::{
+            compose_host_capability_frames, current_host_platform, HostServices,
         },
         BrokerDisconnectAction, BrokerOptions,
     };
@@ -678,6 +697,7 @@ mod native_broker {
             extension_events: ExtensionEventRouter::new(),
             event_hub,
             deferred_hub,
+            host_services: HostServices::new(),
             dialog_polls: PollScheduler::new(),
             sessions: HashMap::new(),
             broker_version: options.package_version.clone(),
@@ -712,6 +732,10 @@ mod native_broker {
         extension_events: ExtensionEventRouter,
         event_hub: EventHub,
         deferred_hub: DeferredPortHub,
+        /// Broker-composition host capabilities (add-ext-notification design
+        /// section 2): the generic pre-dispatch route table's service pair,
+        /// owned on the owner loop thread like the tray registration itself.
+        host_services: HostServices,
         /// Broker-owned dialog poll scheduler (design section 5.2): merged
         /// DialogPollDue event, WaitUntil inputs, re-arm signaling, quota.
         /// Fed by the accepted-deferred-operation registration in the
@@ -851,6 +875,28 @@ mod native_broker {
                     let Some(session) = self.sessions.get_mut(&id) else {
                         return BrokerDisconnectAction::WaitForIdle;
                     };
+                    // Pre-dispatch host-capability hook (add-ext-notification
+                    // design section 2, frozen O1=B ruling): a generic
+                    // composition-layer capability table may answer an
+                    // ExtCommand envelope before kernel dispatch. Win32 routes
+                    // (notification, notify) to the tray-notification bridge,
+                    // which reuses the scope-bound registered tray icon's
+                    // NIF_INFO channel; on darwin the table carries no entry,
+                    // so every notification command reaches the extension
+                    // DLL unchanged. A matched route answers with the same
+                    // Immediate frame family (or a typed error frame) the
+                    // kernel path produces, keeping facades
+                    // transport-agnostic about who answered.
+                    if let Some(frames) = compose_host_capability_frames(
+                        &self.broker,
+                        &session.broker,
+                        &frame,
+                        &self.host_services,
+                        current_host_platform(),
+                    ) {
+                        session.write_frames(frames);
+                        return BrokerDisconnectAction::WaitForIdle;
+                    }
                     let session_was_initialized = session.broker.session_id().is_some();
                     let kernel_session_id = session.broker.session_id().map(ToOwned::to_owned);
                     let exit_action = broker_frame_action(&frame, session_was_initialized);
