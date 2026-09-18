@@ -121,8 +121,12 @@ pub(crate) trait WinClipboard {
 pub(crate) fn open_bounded<T: WinClipboard, C: RetryClock>(
     api: &mut T,
     clock: &C,
+    started: Instant,
 ) -> Result<(), TypedExtensionError> {
-    let started = clock.now();
+    // The frozen budget is anchored at COMMAND DISPATCH, not at open time —
+    // the caller passes the entry Instant so slow alloc/encode work ahead of
+    // the open consumes the same 2s budget and is visible in elapsedMs
+    // (implementation review I1 P1).
     let deadline = started + Duration::from_millis(OPEN_RETRY_BUDGET_MS);
     let mut attempts = 0u32;
     let mut step = 0u32;
@@ -162,10 +166,11 @@ pub(crate) fn flow_write_text<T: WinClipboard, C: RetryClock>(
     clock: &C,
     units: &[u16],
 ) -> Result<(), TypedExtensionError> {
+    let started = clock.now();
     let mem = api
         .alloc(units)
         .map_err(|code| options::unavailable_error(code, "GlobalAlloc"))?;
-    if let Err(error) = open_bounded(api, clock) {
+    if let Err(error) = open_bounded(api, clock, started) {
         // The open discipline failed: reclaim the un-handed-off handle (the
         // clipboard was never opened — no close).
         api.free(mem);
@@ -210,7 +215,8 @@ pub(crate) fn flow_read_text<T: WinClipboard, C: RetryClock>(
     api: &mut T,
     clock: &C,
 ) -> Result<Option<String>, TypedExtensionError> {
-    open_bounded(api, clock)?;
+    let started = clock.now();
+    open_bounded(api, clock, started)?;
     // Copy-out under the open handle: lock-copy-unlock BEFORE close; the
     // decode happens after the handle is released.
     let copied: Result<Option<Vec<u16>>, TypedExtensionError> = match api.get_data() {
@@ -242,7 +248,8 @@ pub(crate) fn flow_clear<T: WinClipboard, C: RetryClock>(
     api: &mut T,
     clock: &C,
 ) -> Result<(), TypedExtensionError> {
-    open_bounded(api, clock)?;
+    let started = clock.now();
+    open_bounded(api, clock, started)?;
     let emptied = api
         .empty()
         .map_err(|code| options::unavailable_error(code, "EmptyClipboard"));
