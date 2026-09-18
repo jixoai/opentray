@@ -25,6 +25,8 @@ import { prepareExampleBrokerBinary } from "./_support/example-runtime-mode";
 import { attachClipboard } from "../../ext-clipboard/src/index";
 import { attachOpener } from "../../ext-opener/src/index";
 import { attachNotification } from "../../ext-notification/src/index";
+import { attachDialog } from "../../ext-dialog/src/index";
+import { attachSound } from "../../ext-sound/src/index";
 import {
   CLIPBOARD_MAX_WRITE_UTF16,
   NOTIFICATION_BODY_LIMIT_UTF16,
@@ -41,7 +43,7 @@ await prepareExampleBrokerBinary(import.meta.url);
 // the self-service fix instead of 23 cryptic scenario errors.
 {
   const exampleDir = dirname(fileURLToPath(import.meta.url));
-  for (const pkg of ["ext-clipboard", "ext-opener", "ext-notification"]) {
+  for (const pkg of ["ext-clipboard", "ext-opener", "ext-notification", "ext-dialog", "ext-sound"]) {
     const manifestUrl = new URL(`../../${pkg}/platforms/manifest.json`, `file://${exampleDir}/`);
     let manifestVersion: string | undefined;
     try {
@@ -86,13 +88,15 @@ interface Scenario {
   readonly id: number;
   readonly title: string;
   readonly run: () => Promise<string>;
+  /** Interactive scenarios block on real modal/picker UI: skipped by --self-test. */
+  readonly interactive: boolean;
 }
 
 const scenarios = new Map<number, Scenario>();
 let nextScenarioId = 100;
-function scenario(title: string, run: () => Promise<string>): number {
+function scenario(title: string, run: () => Promise<string>, interactive = false): number {
   const id = nextScenarioId++;
-  scenarios.set(id, { id, title, run });
+  scenarios.set(id, { id, title, run, interactive });
   return id;
 }
 
@@ -124,12 +128,17 @@ async function runScenario(scenario_: Scenario): Promise<boolean> {
 }
 
 async function runSuite(): Promise<void> {
+  const selfTest = process.argv.includes("--self-test");
   const ordered = [...scenarios.values()].sort((a, b) => a.id - b.id);
+  const runnable = ordered.filter((one) => !selfTest || !one.interactive);
   let passed = 0;
-  for (const one of ordered) {
+  for (const one of runnable) {
     if (await runScenario(one)) passed += 1;
   }
-  console.log(`\n════════ suite summary: ${passed}/${ordered.length} scenarios completed without throwing`);
+  if (selfTest && runnable.length < ordered.length) {
+    console.log(`\n  (${ordered.length - runnable.length} interactive dialog scenarios skipped in --self-test: run them from the tray menu)`);
+  }
+  console.log(`\n════════ suite summary: ${passed}/${runnable.length} scenarios completed without throwing`);
   // Called on a menu click, by which time `notification` is attached.
   await notification
     .notify({
@@ -150,6 +159,8 @@ const tray = await createTray(
         { type: "submenu", title: "Clipboard", items: clipboardMenuItems() },
         { type: "submenu", title: "Opener", items: openerMenuItems() },
         { type: "submenu", title: "Notification", items: notificationMenuItems() },
+        { type: "submenu", title: "Dialog", items: dialogMenuItems() },
+        { type: "submenu", title: "Sound", items: soundMenuItems() },
         { type: "separator" },
         { type: "item", id: 3, title: "Quit Host-Atoms Panel" },
       ],
@@ -161,6 +172,8 @@ const tray = await createTray(
 const clipboard = attachClipboard(tray, { mountId: "host-atoms-clipboard" });
 const opener = attachOpener(tray, { mountId: "host-atoms-opener" });
 const notification = attachNotification(tray, { mountId: "host-atoms-notification" });
+const dialog = attachDialog(tray, { mountId: "host-atoms-dialog" });
+const sound = attachSound(tray, { mountId: "host-atoms-sound" });
 
 // A real file on disk for the open/reveal scenarios (Finder/Explorer
 // selects it; the default app opens it).
@@ -434,6 +447,10 @@ function notificationMenuItems() {
       "Authorization status",
     ),
     item(
+      notificationEnvironmentProbeScenario(),
+      "Environment probe (darwin signing)",
+    ),
+    item(
       scenario("getBackend() frozen snapshot", async () => {
         const backend = await notification.getBackend();
         return (
@@ -444,6 +461,164 @@ function notificationMenuItems() {
       "Backend snapshot",
     ),
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Dialog scenarios (ext-dialog: modal surfaces through the deferred
+// transaction — every scenario's visual check IS the dialog)
+// ---------------------------------------------------------------------------
+
+function dialogMenuItems() {
+  return [
+    item(
+      scenario("alert — one-button modal", async () => {
+        await dialog.alert("host-atoms: alert", { detail: "the one-button sugar modal" });
+        return "modal appeared and was dismissed (visual check)";
+      }, true),
+      "Alert",
+    ),
+    item(
+      scenario("confirm — two-button modal returning the button", async () => {
+        const yes = await dialog.confirm("host-atoms: confirm?", { severity: "warning" });
+        return `response=${yes} (the button you clicked)`;
+      }, true),
+      "Confirm",
+    ),
+    item(
+      scenario("messageDialog — full options (buttons/default/cancel/severity/suppression)", async () => {
+        const result = await dialog.messageDialog({
+          message: "Apply the staged changes?",
+          detail: "messageDialog exercises the complete MessageDialogOptions surface",
+          buttons: ["Review", "Apply", "Cancel"],
+          defaultId: 1,
+          cancelId: 2,
+          severity: "info",
+          suppressionLabel: "Remember my choice",
+        });
+        return `response=${JSON.stringify(result)} (suppression checkbox is part of the result)`;
+      }, true),
+      "MessageDialog (full)",
+    ),
+    item(
+      scenario("pickFile — single + multiple pickers (filters, defaultPath)", async () => {
+        const single = await dialog.pickFile({ filters: [{ name: "Text", extensions: ["txt", "md"] }] });
+        const many = await dialog.pickFile({
+          multiple: true,
+          defaultPath: revealTarget,
+        });
+        return `single=${JSON.stringify(single)} multiple=${JSON.stringify(many)} (cancel = null, first-class)`;
+      }, true),
+      "Pick files",
+    ),
+    item(
+      scenario("pickDirectory + pickSavePath (fileNameLabel, filters)", async () => {
+        const dir = await dialog.pickDirectory({ title: "host-atoms: choose a directory" });
+        const save = await dialog.pickSavePath({
+          fileNameLabel: "host-atoms-report",
+          filters: [],
+        });
+        return `dir=${JSON.stringify(dir)} save=${JSON.stringify(save)} (save canonicalizes against its parent)`;
+      }, true),
+      "Pick directory / save path",
+    ),
+    item(
+      scenario("getBackend() frozen snapshot", async () => {
+        const backend = await dialog.getBackend();
+        return `platform=${backend.platform} modalEngine=${(backend as { modalEngine?: string }).modalEngine ?? "n/a"}`;
+      }),
+      "Backend snapshot",
+    ),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Sound scenarios (ext-sound: OS feedback atoms — audibility IS the check)
+// ---------------------------------------------------------------------------
+
+function soundMenuItems() {
+  return [
+    item(
+      scenario('beep — every kind (default/info/warning/error/question)', async () => {
+        for (const kind of ["default", "info", "warning", "error", "question"] as const) {
+          await sound.beep(kind);
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+        return "five system beeps played in sequence (audibility is the check)";
+      }),
+      "Beep: all kinds",
+    ),
+    item(
+      scenario('playSystemSound — common names (notification/warning/error)', async () => {
+        for (const name of ["notification", "warning", "error"] as const) {
+          await sound.playSystemSound(name);
+          await new Promise((resolve) => setTimeout(resolve, 450));
+        }
+        return "three common-name sounds played (audibility is the check)";
+      }),
+      "System sounds: common",
+    ),
+    item(
+      scenario("playSystemSound — one platform-native name + one guaranteed miss", async () => {
+        const native = process.platform === "win32" ? "SystemHand" : "Basso";
+        await sound.playSystemSound(native).catch(() => undefined);
+        try {
+          await sound.playSystemSound("DefinitelyNotASoundNameXYZ");
+          return "UNEXPECTED: guaranteed miss resolved";
+        } catch (error) {
+          return `miss rejected typed: ${formatError(error)}`;
+        }
+      }),
+      "Native name + typed miss",
+    ),
+    item(
+      scenario("playSound — the probe file's sibling WAV? use a system sound file", async () => {
+        // win32: C:\Windows\Media\*.wav; darwin: system sounds are not files —
+        // playSound is a win32-path capability, so this scenario documents
+        // the platform split instead of fabricating a file.
+        if (process.platform !== "win32") {
+          return "darwin: playSound is exercised on win32 (see skills reference); skipped here by design";
+        }
+        await sound.playSound("C:\\Windows\\Media\\Windows Notify.wav");
+        return "wav played";
+      }),
+      "Play WAV file",
+    ),
+    item(
+      scenario("getBackend() frozen snapshot", async () => {
+        const backend = await sound.getBackend();
+        return `platform=${backend.platform} commonNames=${(backend as { commonSystemSoundNames?: readonly string[] }).commonSystemSoundNames?.join("/") ?? "n/a"}`;
+      }),
+      "Backend snapshot",
+    ),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Notification environment probe (darwin macOS 26 signing reality)
+// ---------------------------------------------------------------------------
+
+function notificationEnvironmentProbeScenario(): number {
+  return scenario(
+    "notification environment probe — darwin carrier signing reality (macOS 26)",
+    async () => {
+      const status = await notification.getAuthorizationStatus();
+      const backend = await notification.getBackend();
+      if (backend.platform !== "darwin") {
+        return `win32: authorization is the documented always-granted projection (status=${status})`;
+      }
+      const lines = [
+        `authorizationStatus=${status}`,
+        "darwin facts (empirical, macOS 26.5): an ad-hoc/linker-signed carrier is REFUSED",
+        "user-notification authorization (UNErrorCodeNotificationsNotAllowed) in every launch",
+        "shape (direct-exec, LaunchServices launch, LSUIElement, accessory AppKit) — the system",
+        "never shows the permission prompt and System Settings > Notifications never lists the",
+        "app. UN posts may be accepted but banners do not present. Presentation requires a",
+        "Developer-ID-signed carrier (a plist key is NOT the variable — verified by matrix).",
+        "This typed evidence is the expected acceptance outcome on an unsigned dev carrier.",
+      ];
+      return lines.join("\n         ");
+    },
+  );
 }
 
 tray.onMenuClick(({ itemId }) => {

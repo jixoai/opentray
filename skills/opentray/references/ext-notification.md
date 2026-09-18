@@ -134,9 +134,21 @@ rendering across platforms.
 
 ### macOS
 
+- **Presentation requires a Developer-ID-signed carrier (empirical, macOS 26.5)**:
+  OpenTray materializes the caller-specific Darwin carrier `.app` with an ad-hoc
+  signature for coherent dev installs. On macOS 26, `UNUserNotificationCenter` REFUSES
+  authorization for ad-hoc/linker-signed apps in every launch shape (direct-exec,
+  LaunchServices launch, `LSUIElement`, accessory AppKit — verified by an isolation
+  matrix): `requestAuthorization()` rejects typed `notification_failed`
+  `{ nsErrorCode: 1 }` (UNErrorCodeNotificationsNotAllowed), the system prompt never
+  appears, and System Settings > Notifications never lists the app. Posts may be
+  accepted but banners do not present. A plist key is NOT the variable. Shipping
+  notification banners on darwin requires re-signing the carrier with a real
+  Developer ID identity (a future runtime option); `getAuthorizationStatus()` and the
+  typed contract surfaces remain correct and testable on ad-hoc dev carriers.
 - Channel is `UNUserNotificationCenter`; the caller-specific Darwin carrier `.app`
-  bundle identity (which OpenTray materializes for you) is what makes it work — no
-  extra setup.
+  bundle identity (which OpenTray materializes for you) is what makes the UN channel
+  reachable at all — no extra setup.
 - Authorization is real: `getAuthorizationStatus()` reads the system state
   (`notDetermined` before the user has decided), and `requestAuthorization()` resolves
   the user's decision. A first `notify` while `notDetermined` implicitly triggers the

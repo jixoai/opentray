@@ -615,6 +615,17 @@ applies unchanged and is not repeated here.
 
 ### Notification (essentials)
 
+- **darwin presentation law (empirical, macOS 26.5, 2026-09-19)**: UNUserNotificationCenter
+  refuses authorization for ad-hoc/linker-signed carriers in every launch shape
+  (direct-exec, LaunchServices launch, LSUIElement, accessory AppKit — isolation-matrix
+  verified via a minimal UN probe): `UNErrorCodeNotificationsNotAllowed`, no system
+  prompt, no System Settings entry; posts may be accepted but banners never present.
+  A plist key is NOT the variable. Banner presentation on darwin requires a
+  Developer-ID-signed carrier (future runtime option); the typed contract surfaces
+  (`getAuthorizationStatus`, typed `notification_failed {nsErrorCode:1}`) are the
+  honest, testable outcomes on ad-hoc dev carriers. The first notify's deferred
+  acceptance (auth query inside the 10 s budget) resolves through the terminal —
+  the facade accepts both settle shapes (host-atoms panel regression, 2026-09-19).
 - `notify` is resolve-on-acceptance (the sound law): acceptance is the native call being
   taken, never presentation. Payload bounds are one platform-independent contract in
   UTF-16 code units — title ≤ 64, body ≤ 256, subtitle ≤ 64 — taken from the win32
