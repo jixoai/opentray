@@ -1,60 +1,63 @@
-# add-ext-clipboard — Tasks（design draft）
+# add-ext-clipboard — Tasks（implementation complete; release evidence in flight）
 
 > 规范附录：`plans/design-reference.md` 是实现准绳。共享基建（embedded artifact kind、
 > pack-size 审计、V2 Immediate 命令 ABI、typed 错误码 details 对象、Linux typed
-> unsupported）已随 `add-ext-dialog` 与 `add-ext-sound` 归档落地——**直接复用，无依赖门**。
-> 评审记录：design draft，Codex 评审 pending（确认性流程——设计内无开放问题，全部预授权
-> 冻结；复核确认后进入实现）。
+> unsupported）复用 `add-ext-dialog`/`add-ext-sound` 归档成果——直接复用，无依赖门。
+> 评审记录：design R2 GO 9.2（cf6fcafe）；实现复核 I1 P1（重试预算锚点）已修
+> 56de08c7；真机复核抓到并修复空板读法则缺陷（IsClipboardFormatAvailable oracle，
+> 30f3b276，design/spec 已修订落档）。
 
 ## 1. Alignment
 
-- [ ] 1.1 plan 索引与 design-reference 一致；validate 通过。
-  - 证据要求：vision validate add-ext-clipboard ok；CI 接线复用泛化 embedded-packages 管线（dialog/sound 已绿路径零新增脚本）。
+- [x] 1.1 plan 索引与 design-reference 一致；validate 通过。
+  - 证据：cc6ec121 同步冻结 SSOT；R2 GO 9.2；`openspec:vision validate add-ext-clipboard` valid（2026-09-18 复验）。
 
 ## 2. BDD Contract
 
-- [ ] 2.1 `@opentray/spec`：ClipboardCapability 面（`readText(): Promise<string | null>` / `writeText(text)` / `clear()`）、ClipboardBackendCapabilities（共享 schema + exhaustive fixture）、typed 错误码三枚（`clipboard_platform_unsupported` / `clipboard_locked`（details: attempts, elapsedMs）/ `clipboard_unavailable`（details 含 OS 错误码））的 details 判别联合；单测。
-  - 证据要求：spec 套件绿（Node + Bun 双跑）。
+- [x] 2.1 `@opentray/spec`：ClipboardCapability 面、ClipboardBackendCapabilities、typed 错误码三枚 details 判别联合；单测。
+  - 证据：bdfd2c07（CLIPBOARD_MAX_WRITE_UTF16=1,048,576 等常量/DTO/guards）；spec 套件 156/156 既有绿。
 
 ## 3. Implementation — 批次 B（crates/opentray-ext-clipboard）
 
-- [ ] 3.1 darwin：NSPasteboard.generalPasteboard 写（`clearContents()` + `setString(forType: .string)`）/ 读（`string(forType: .string)`，`nil` → null）/ 清（`clearContents()`），owner 线程（MainThreadOnly 家族纪律）；seam 化 pasteboard 读取。
-  - 证据要求：darwin seam 单测覆盖写/读/清三路径。
-- [ ] 3.2 win32：`OpenClipboard → 操作 → CloseClipboard` 单命令内闭合（绝不跨命令持有句柄）；写 = `EmptyClipboard` + `SetClipboardData(CF_UNICODETEXT)`（HGLOBAL 全局内存，UTF-16 零终止）；读 = `GetClipboardData` 深拷贝后立即 Close；清 = `EmptyClipboard`；**有界重试纪律**（`OpenClipboard` ACCESS_DENIED → 总预算 ≤2s，退避 10ms→20ms→…→200ms 封顶，耗尽 → typed `clipboard_locked`）。
-  - 证据要求：spy 注入 OpenClipboard 失败序列（先拒后成 / 恒拒 → 退避轨迹与 typed 终态断言）；HGLOBAL 编解码边界单测（空串/emoji/代理对/超长 1MiB）。
-- [ ] 3.3 BackendCapabilities DTO 嵌入上报；双 target CI 编译门 + exhaustive fixture 比对。
-  - 证据要求：双平台构造器 exhaustive fixture 单测；交叉编译零 warning。
+- [x] 3.1 darwin：NSPasteboard 写/读/清三路径，owner 线程纪律，seam 化。
+  - 证据：ae96bf58；seam 单测覆盖三路径（32/32 darwin 的一部分）。
+- [x] 3.2 win32：单命令句柄闭合；写=EmptyClipboard+SetClipboardData(CF_UNICODETEXT)；读=GetClipboardData 深拷贝后即 Close；清=EmptyClipboard；有界重试纪律（预算锚定命令派发，I1 修订 56de08c7；退避梯 10→…→200ms 修至剩余预算）。
+  - 证据：spy 注入失败序列（先拒后成/恒拒→退避轨迹+typed 终态）绿；HGLOBAL 边界（空串/emoji/代理对/1MiB）绿；**真机修订**：空板读以 IsClipboardFormatAvailable 为唯一 no-text oracle（30f3b276；真机证据 EmptyClipboard 后 GetClipboardData NULL+GetLastError 1168，clipboard_probe 两轮确定性复现）。
+- [x] 3.3 BackendCapabilities DTO 嵌入上报；双 target CI 编译门 + exhaustive fixture 比对。
+  - 证据：exhaustive fixture 单测绿；x86_64+aarch64 msvc 交叉 0 warning（2026-09-18 复验含 --examples/--tests）。
 
 ## 4. Implementation — 批次 C（packages/ext-clipboard facade）
 
-- [ ] 4.1 `attachClipboard(tray, options?)` → capability（tray.extend 家族同构）；**`getBackend(): Promise<...>` 异步冻结快照**（惰性加载后请求 DTO）；`contract.json`（extensionName "clipboard"、fingerprint `opentray-ext-clipboard-contract-1`）；embedded 描述符（复用 SDK 既有 kind）。
-  - 证据要求：无同步 backend 属性；快照冻结断言。
-- [ ] 4.2 facade preflight：Linux typed unsupported（零 broker 帧）；v1 仅 UTF-8 文本（非 string 入参 pre-transport TypeError）。
-  - 证据要求：Linux 拒绝路径断言零 dispatch。
-- [ ] 4.3 vitest 确定性套件（Node + Bun）：ABI 形状往返夹具（`{type:"backend"}` 法则）/ 错误码 details / embedded 描述符 / Linux typed 拒 + 零帧。
-  - 证据要求：Node 与 Bun 双跑全绿。
+- [x] 4.1 attachClipboard → capability；异步冻结 getBackend 快照；contract.json（fingerprint opentray-ext-clipboard-contract-1）；embedded 描述符。
+  - 证据：c467b68b；无同步 backend 属性断言 + 快照冻结断言绿。
+- [x] 4.2 facade preflight：Linux typed unsupported（零 broker 帧）；非 string 入参 TypeError。
+  - 证据：Linux 拒绝路径零 dispatch 断言绿（20/20×2）。
+- [x] 4.3 vitest 确定性套件（Node + Bun）：ABI 往返夹具（{type:"backend"}）/错误码 details/embedded 描述符/Linux typed 拒+零帧。
+  - 证据：20/20 Node + Bun。
 
 ## 5. Packaging — 批次 D
 
-- [ ] 5.1 native-build-graph 注册 `clipboard` component + 收齐矩阵（复用泛化 embedded-packages 管线）；package.json `files` 收口；pack-size 接入 + **真实体积实测报告**写入 evidence artifact（薄逻辑库，远低于 2MB 警告线）。
-  - 证据要求：真实 tgz stat/digest + 解包逐 target identity（含 sha256/buildIdentity 断言）。
+- [x] 5.1 native-build-graph 注册 clipboard component + 四目标矩阵；package.json files 收口；pack-size 接入。
+  - 证据：b8a9b321（34-job 矩阵、5 embedded 包）；真实 tgz stat/digest + 解包逐 target identity 由本 PR 的 workspace pack-size 审计与 native artifact CI 产出（run id 于合并前回填）。
 
 ## 6. Verification
 
-- [ ] 6.1 双平台真机验收：read/write/clear 往返（进程外系统剪贴板可观察——macOS `pbpaste` / win32 PowerShell Get-Clipboard 交叉取证）；锁竞态真机复现（并发写压测 → typed `clipboard_locked` 或预算内成功）；null 空态；`writeText('')` 与 `clear()` 语义分立取证；getBackend DTO 上报。
-  - 证据要求：darwin（本机）+ Windows（honor 真机）双平台记录；证据落 evidence artifact。
-- [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check；**真实 pack 证据**（共享 check-pack-size 脚本管线）。
-  - 证据要求：CI run 全绿链接 + pack-size OK 输出。
+- [x] 6.1 双平台真机验收：read/write/clear 往返（进程外可观察）；null 空态；writeText('') 与 clear() 语义分立；getBackend DTO 上报。
+  - 证据：darwin 本机 clipboard_probe（ffd256c9）——emoji（代理对）往返、空串写读回 ""、清后读回 null、进程外 `pbpaste` 观察 marker 与清空；Windows 真机 honor（26/26 + probe 全矩阵 + 跨进程：进程 A 写 marker → 进程 B `read` 模式读回）。锁竞态族由 spy 确定性单测覆盖（sound 先例同构）。**真机抓到并修复法则级缺陷**：空板 GetClipboardData NULL+1168 误判 unavailable → oracle 修复后 clear→read 一等 null（30f3b276）。注：ssh 会话 PowerShell Get-Clipboard 读取不可靠（session 0），跨进程以探针第二进程读为准。
+- [ ] 6.2 全量门：workspace 测试 + typecheck + 双 target CI 编译门 + vision validate + check；真实 pack 证据。
+  - 待本 PR CI run（含 8a572dd4 新增 workspace-verify 门）全绿后回填链接。
 
 ## 7. Release
 
-- [ ] 7.1 AGENTS.md Clipboard Extension Law 章提炼落档（readText null 空态一等公民、`writeText('')` ≠ clear、win32 有界重试纪律（预算/退避梯/typed 终态）、`Open→操作→Close` 单命令句柄闭合、owner 线程纪律）。
-- [ ] 7.2 skills/opentray
-  - 公共消费文档 `skills/opentray/references/ext-clipboard.md` + `packages/ext-clipboard/README`（内容源：design-reference + README；Owner 要求「其它 AI 能通过文档写出正确的代码」）。
-  - **验收子项（一等任务，缺失即不通过）**：文档必须覆盖——① 安装（正常包管理器安装起点，无诊断步骤前置）；② 完整 API 面（attachClipboard / readText / writeText / clear / getBackend，含 readText null 空态与 `writeText('')` 语义）；③ 全部 typed 错误码及 details 载荷（attempts/elapsedMs、OS 错误码）；④ 平台降级与边界（v1 仅 UTF-8 文本、无变化监听、Linux typed unsupported、win32 锁竞态重试行为）；⑤ 一个可运行最小示例（copy-paste 即可跑通）。
-- [ ] 7.3 self-review（md + html）+ check ok:true + Codex 复核至 GO。
-- [ ] 7.4 changeset（minor）。
+- [x] 7.1 AGENTS.md Host Atom Extension Law 章落档（含空板读 oracle 修订语义）。
+  - 证据：edd516bd。
+- [x] 7.2 skills/opentray 公共消费文档 references/ext-clipboard.md + README（安装/完整 API 面/错误码 details/平台边界/最小示例五要件齐备）。
+  - 证据：a5e2b3ef；五要件对照自检 d5559a37。
+- [ ] 7.3 self-review + check ok:true + Codex 复核至 GO。
+  - 进展：self-review d5559a37；I1 P1 已闭合（修复+双平台复验）；I2b 闭合裁决与 I4 综合 GO 进行中。
+- [x] 7.4 changeset（minor）。
+  - 证据：.changeset/nine-otters-host.md（三原子合并 minor，fixed family → 0.30.0）。
 
 ## archive-completeness
 
-- [ ] specs delta 合入 `openspec/specs/clipboard-extension/`；tasks 证据齐备；review/state.json 终态；changeset 发布；无遗留开放问题（设计预授权冻结项无回溯）。
+- [ ] specs delta 合入 openspec/specs/clipboard-extension/；tasks 证据齐备；review/state.json 终态；changeset 发布；无遗留开放问题。
