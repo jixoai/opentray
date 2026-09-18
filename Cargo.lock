@@ -2319,6 +2319,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentray-ext-clipboard"
+version = "0.0.0"
+dependencies = [
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "opentray-spec",
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "opentray-ext-dialog"
 version = "0.0.0"
 dependencies = [
@@ -2332,6 +2345,19 @@ dependencies = [
  "serde",
  "serde_json",
  "windows",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "opentray-ext-opener"
+version = "0.0.0"
+dependencies = [
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "opentray-spec",
+ "serde",
+ "serde_json",
  "windows-sys 0.61.2",
 ]
 
