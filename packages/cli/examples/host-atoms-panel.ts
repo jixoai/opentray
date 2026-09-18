@@ -17,7 +17,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createTray } from "../src/index";
@@ -40,9 +40,16 @@ await prepareExampleBrokerBinary(import.meta.url);
 // output, so after a version bump the embedded identity chain (manifest
 // facadeVersion vs package.json) goes stale and EVERY dispatched scenario
 // rejects with OPENTRAY_NATIVE_EXTENSION_MANIFEST_INVALID. Fail loudly with
-// the self-service fix instead of 23 cryptic scenario errors.
+// the self-service fix instead of 23 cryptic scenario errors. All stale
+// packages are reported together and the fix is ONE paste-able block —
+// exiting on the first mismatch would send the runner through five
+// consecutive failures.
 {
   const exampleDir = dirname(fileURLToPath(import.meta.url));
+  // examples/ lives at <repo>/packages/cli/examples; the restage block's
+  // `packages/$p` paths need cwd = <repo> (the parent of packages/).
+  const repoRoot = resolve(exampleDir, "../../..");
+  const stale: Array<{ pkg: string; packageVersion: string; manifestVersion: string | undefined }> = [];
   for (const pkg of ["ext-clipboard", "ext-opener", "ext-notification", "ext-dialog", "ext-sound"]) {
     const manifestUrl = new URL(`../../${pkg}/platforms/manifest.json`, `file://${exampleDir}/`);
     let manifestVersion: string | undefined;
@@ -61,21 +68,36 @@ await prepareExampleBrokerBinary(import.meta.url);
       ) as { version: string }
     ).version;
     if (manifestVersion !== packageVersion) {
-      console.error(
-        `\nhost-atoms panel: ${pkg} platforms/ is stale or missing\n` +
-          `  package.json: ${packageVersion}   platforms/manifest.json: ${manifestVersion ?? "<absent>"}\n` +
-          `  The embedded identity chain rejects mismatched builds with\n` +
-          `  OPENTRAY_NATIVE_EXTENSION_MANIFEST_INVALID on every command.\n\n` +
-          `  Fix per package (matches the published artifact exactly), e.g. for ${pkg} @ ${packageVersion}:\n` +
-          `    npm pack @opentray/${pkg}@${packageVersion} --pack-destination /tmp\n` +
-          `    rm -rf packages/${pkg}/platforms\n` +
-          `    tar -xzf /tmp/opentray-${pkg}-${packageVersion}.tgz -C /tmp\n` +
-          `    cp -R /tmp/package/platforms packages/${pkg}/platforms && rm -rf /tmp/package\n` +
-          `  (or build locally: bun run scripts/binaries/build-native-job.ts\n` +
-          `   --target <target> --components clipboard,opener,notification)\n`,
-      );
-      process.exit(1);
+      stale.push({ pkg, packageVersion, manifestVersion });
     }
+  }
+  if (stale.length > 0) {
+    const details = stale
+      .map(
+        ({ pkg, packageVersion, manifestVersion }) =>
+          `  ${pkg}: package.json ${packageVersion}   platforms/manifest.json ${manifestVersion ?? "<absent>"}`,
+      )
+      .join("\n");
+    const restageEntries = stale.map(({ pkg, packageVersion }) => `"${pkg}@${packageVersion}"`).join(" ");
+    console.error(
+      `\nhost-atoms panel: staged platforms/ stale or missing for ${stale.length} package(s)\n` +
+        `${details}\n` +
+        `  The embedded identity chain rejects mismatched builds with\n` +
+        `  OPENTRAY_NATIVE_EXTENSION_MANIFEST_INVALID on every command.\n\n` +
+        `  One-paste restage from the published artifacts (exact bytes the\n` +
+        `  embedded identity chain expects):\n` +
+        `    cd ${repoRoot}\n` +
+        `    for entry in ${restageEntries}; do\n` +
+        `      p=\${entry%@*}; v=\${entry#*@}\n` +
+        `      npm pack @opentray/$p@$v --pack-destination /tmp\n` +
+        `      rm -rf packages/$p/platforms /tmp/package\n` +
+        `      tar -xzf /tmp/opentray-$p-$v.tgz -C /tmp\n` +
+        `      cp -R /tmp/package/platforms packages/$p/platforms && rm -rf /tmp/package\n` +
+        `    done\n` +
+        `  (or build locally: bun run scripts/binaries/build-native-job.ts\n` +
+        `   --target <target> --components clipboard,opener,notification)\n`,
+    );
+    process.exit(1);
   }
 }
 
