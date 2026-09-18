@@ -70,7 +70,16 @@ What each scenario proves (read the console block; the notification/opener scena
 - **Opener** — https/file:/mailto/absolute-path acceptance (browser, default app), reveal-with-selection and the root-reveal law in Finder/Explorer, blocked-scheme (`ftp`), relative-path, and path-quote typed rejections, `allowedSchemes` snapshot.
 - **Notification** — title/body/subtitle/silent presentations (darwin native subtitle vs win32 em-dash join; subtitle-only never leaves a dangling separator), exact 64/256/64 boundary payloads, over-limit and unknown-field typed rejections, `requestAuthorization`/`getAuthorizationStatus` (darwin real prompt; win32 documented always-granted), frozen backend snapshot.
 
-Negative scenarios are designed to throw: the console prints the typed `code` + `details` payload — acceptance is reading that payload against the frozen contract. Prerequisite: the embedded `platforms/` libraries under `packages/ext-{clipboard,opener,notification}` (staged by the release pipeline, or a local `bun run scripts/binaries/build-native-job.ts --target <target> --components clipboard,opener,notification`), plus the shared broker preflight below.
+Negative scenarios are designed to throw: the console prints the typed `code` + `details` payload — acceptance is reading that payload against the frozen contract. Prerequisite: the embedded `platforms/` libraries under the three ext packages, version-matched to their `package.json` (they are gitignored build outputs — after a version bump a stale copy makes every dispatched scenario reject with `OPENTRAY_NATIVE_EXTENSION_MANIFEST_INVALID`; the panel preflights this and prints the exact restage commands). Restage from the published package:
+
+```bash
+npm pack @opentray/ext-clipboard@<version> --pack-destination /tmp
+rm -rf packages/ext-clipboard/platforms
+tar -xzf /tmp/opentray-ext-clipboard-<version>.tgz -C /tmp
+cp -R /tmp/package/platforms packages/ext-clipboard/platforms && rm -rf /tmp/package
+```
+
+(or build locally with `bun run scripts/binaries/build-native-job.ts --target <target> --components clipboard,opener,notification`), plus the shared broker preflight below.
 
 ```bash
 pnpm --filter opentray example:hostAtoms

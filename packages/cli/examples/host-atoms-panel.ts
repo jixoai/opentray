@@ -15,9 +15,10 @@
  * `bun run scripts/binaries/build-native-job.ts --target <target>
  * --components clipboard,opener,notification`.)
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createTray } from "../src/index";
 import { prepareExampleBrokerBinary } from "./_support/example-runtime-mode";
@@ -32,6 +33,49 @@ import {
 } from "../../spec/src/index";
 
 await prepareExampleBrokerBinary(import.meta.url);
+
+// Staged-platforms freshness preflight: `platforms/` is a gitignored build
+// output, so after a version bump the embedded identity chain (manifest
+// facadeVersion vs package.json) goes stale and EVERY dispatched scenario
+// rejects with OPENTRAY_NATIVE_EXTENSION_MANIFEST_INVALID. Fail loudly with
+// the self-service fix instead of 23 cryptic scenario errors.
+{
+  const exampleDir = dirname(fileURLToPath(import.meta.url));
+  for (const pkg of ["ext-clipboard", "ext-opener", "ext-notification"]) {
+    const manifestUrl = new URL(`../../${pkg}/platforms/manifest.json`, `file://${exampleDir}/`);
+    let manifestVersion: string | undefined;
+    try {
+      manifestVersion = (
+        JSON.parse(readFileSync(fileURLToPath(manifestUrl), "utf8")) as {
+          facadeVersion?: string;
+        }
+      ).facadeVersion;
+    } catch {
+      // missing platforms/ entirely — the guidance below covers it too
+    }
+    const packageVersion = (
+      JSON.parse(
+        readFileSync(new URL(`../../${pkg}/package.json`, `file://${exampleDir}/`), "utf8"),
+      ) as { version: string }
+    ).version;
+    if (manifestVersion !== packageVersion) {
+      console.error(
+        `\nhost-atoms panel: ${pkg} platforms/ is stale or missing\n` +
+          `  package.json: ${packageVersion}   platforms/manifest.json: ${manifestVersion ?? "<absent>"}\n` +
+          `  The embedded identity chain rejects mismatched builds with\n` +
+          `  OPENTRAY_NATIVE_EXTENSION_MANIFEST_INVALID on every command.\n\n` +
+          `  Fix per package (matches the published artifact exactly), e.g. for ${pkg} @ ${packageVersion}:\n` +
+          `    npm pack @opentray/${pkg}@${packageVersion} --pack-destination /tmp\n` +
+          `    rm -rf packages/${pkg}/platforms\n` +
+          `    tar -xzf /tmp/opentray-${pkg}-${packageVersion}.tgz -C /tmp\n` +
+          `    cp -R /tmp/package/platforms packages/${pkg}/platforms && rm -rf /tmp/package\n` +
+          `  (or build locally: bun run scripts/binaries/build-native-job.ts\n` +
+          `   --target <target> --components clipboard,opener,notification)\n`,
+      );
+      process.exit(1);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Acceptance harness (declared before the tray: menu construction registers
