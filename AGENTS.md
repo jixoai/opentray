@@ -615,17 +615,25 @@ applies unchanged and is not repeated here.
 
 ### Notification (essentials)
 
-- **darwin presentation law (empirical, macOS 26.5, 2026-09-19)**: UNUserNotificationCenter
-  refuses authorization for ad-hoc/linker-signed carriers in every launch shape
-  (direct-exec, LaunchServices launch, LSUIElement, accessory AppKit — isolation-matrix
-  verified via a minimal UN probe): `UNErrorCodeNotificationsNotAllowed`, no system
-  prompt, no System Settings entry; posts may be accepted but banners never present.
-  A plist key is NOT the variable. Banner presentation on darwin requires a
-  Developer-ID-signed carrier (future runtime option); the typed contract surfaces
-  (`getAuthorizationStatus`, typed `notification_failed {nsErrorCode:1}`) are the
-  honest, testable outcomes on ad-hoc dev carriers. The first notify's deferred
-  acceptance (auth query inside the 10 s budget) resolves through the terminal —
-  the facade accepts both settle shapes (host-atoms panel regression, 2026-09-19).
+- **darwin presentation law (empirical macOS 26.5; osascript bridge fallback, Owner
+  ruling 2026-09-19)**: UNUserNotificationCenter refuses authorization for
+  ad-hoc/linker-signed carriers in every launch shape (isolation-matrix verified:
+  direct-exec, LaunchServices launch, LSUIElement, accessory AppKit —
+  `UNErrorCodeNotificationsNotAllowed`, no prompt, no Settings entry; a plist key is
+  NOT the variable). Every darwin post therefore triages the running process's
+  code-signature class first (`SecCodeCopySelf` + `SecCodeCopySigningInformation`):
+  a presentable signature posts through the UN center; unsigned/ad-hoc carriers post
+  through the `/usr/bin/osascript` `display notification` bridge (Apple-signed host,
+  always allowed) with title/body/subtitle passed as `run` ARGUMENTS — never
+  interpolated into AppleScript literals — and `sound name "default"` unless silent.
+  Acceptance stays resolve-on-acceptance (spawn success); banners attribute to the
+  osascript host icon (documented degradation). The authorization commands keep their
+  honest UN semantics, and a DENIED snapshot still rejects typed with zero delivery
+  (the bridge is unreachable on the denied path). A Developer-ID-signed carrier
+  remains the full-experience path for developers who can sign. The first notify's
+  deferred acceptance (auth query inside the 10 s budget) resolves through the
+  terminal — the facade accepts both settle shapes (host-atoms panel regression,
+  2026-09-19).
 - `notify` is resolve-on-acceptance (the sound law): acceptance is the native call being
   taken, never presentation. Payload bounds are one platform-independent contract in
   UTF-16 code units — title ≤ 64, body ≤ 256, subtitle ≤ 64 — taken from the win32

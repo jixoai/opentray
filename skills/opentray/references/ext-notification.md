@@ -134,18 +134,21 @@ rendering across platforms.
 
 ### macOS
 
-- **Presentation requires a Developer-ID-signed carrier (empirical, macOS 26.5)**:
+- **Unsigned carriers fall back to the osascript bridge (macOS 26, empirical)**:
   OpenTray materializes the caller-specific Darwin carrier `.app` with an ad-hoc
-  signature for coherent dev installs. On macOS 26, `UNUserNotificationCenter` REFUSES
-  authorization for ad-hoc/linker-signed apps in every launch shape (direct-exec,
-  LaunchServices launch, `LSUIElement`, accessory AppKit — verified by an isolation
-  matrix): `requestAuthorization()` rejects typed `notification_failed`
-  `{ nsErrorCode: 1 }` (UNErrorCodeNotificationsNotAllowed), the system prompt never
-  appears, and System Settings > Notifications never lists the app. Posts may be
-  accepted but banners do not present. A plist key is NOT the variable. Shipping
-  notification banners on darwin requires re-signing the carrier with a real
-  Developer ID identity (a future runtime option); `getAuthorizationStatus()` and the
-  typed contract surfaces remain correct and testable on ad-hoc dev carriers.
+  signature for coherent installs. macOS 26 refuses `UNUserNotificationCenter`
+  authorization for ad-hoc/linker-signed apps in every launch shape (isolation-matrix
+  verified): the system prompt never appears and System Settings > Notifications
+  never lists the app. Every darwin `notify` therefore checks the running process's
+  code-signature class first: a properly signed app posts through the UN center
+  (full experience — correct icon, per-app Settings entry); an unsigned/ad-hoc
+  carrier posts through `/usr/bin/osascript`'s `display notification` (Apple-signed
+  host, always allowed), with title/body/subtitle passed as arguments (never
+  interpolated into AppleScript strings) and the default alert sound unless `silent`.
+  Banners on the bridge attribute to the osascript host icon — the documented
+  degradation. `requestAuthorization()`/`getAuthorizationStatus()` keep their honest
+  UN semantics on both channels, and an explicit DENIED state still rejects typed
+  with zero delivery.
 - Channel is `UNUserNotificationCenter`; the caller-specific Darwin carrier `.app`
   bundle identity (which OpenTray materializes for you) is what makes the UN channel
   reachable at all — no extra setup.

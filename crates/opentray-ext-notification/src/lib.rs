@@ -370,7 +370,7 @@ fn platform_notify(
 
     let mut core = extension.core.borrow_mut();
     let snapshot = core.engine.snapshot(scope).copied();
-    let mut post = macos::OwnerPost;
+    let mut post = macos::OwnerPost::default();
     match auth::immediate_notify_transaction(snapshot.as_ref(), &content, &mut post) {
         auth::NotifyImmediate::Denied(error) => {
             zero_disposition_then_typed(out_disposition, EXT_ERR_REJECTED, &error)
@@ -595,7 +595,7 @@ fn backend_capabilities() -> Result<options::NotificationBackendCapabilities, Ty
 /// transactions to settle — the honest guard).
 #[cfg(target_os = "macos")]
 pub(crate) fn platform_owner_post() -> Box<dyn auth::PostSink> {
-    Box::new(macos::OwnerPost)
+    Box::new(macos::OwnerPost::default())
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -630,13 +630,13 @@ function notificationEnvironmentProbeScenario(): number {
       }
       const lines = [
         `authorizationStatus=${status}`,
-        "darwin facts (empirical, macOS 26.5): an ad-hoc/linker-signed carrier is REFUSED",
-        "user-notification authorization (UNErrorCodeNotificationsNotAllowed) in every launch",
-        "shape (direct-exec, LaunchServices launch, LSUIElement, accessory AppKit) — the system",
-        "never shows the permission prompt and System Settings > Notifications never lists the",
-        "app. UN posts may be accepted but banners do not present. Presentation requires a",
-        "Developer-ID-signed carrier (a plist key is NOT the variable — verified by matrix).",
-        "This typed evidence is the expected acceptance outcome on an unsigned dev carrier.",
+        "darwin facts (empirical, macOS 26.5): the UN center refuses authorization for",
+        "ad-hoc/linker-signed carriers in every launch shape — so every post triages the",
+        "process's code-signature class first: a properly signed app posts through the UN",
+        "center (full experience); an unsigned carrier posts through the osascript",
+        "display-notification bridge (Apple-signed host, always allowed; banners attribute",
+        "to the osascript icon — the documented degradation). Authorization commands keep",
+        "their honest UN semantics; a denied state still rejects typed with zero delivery.",
       ];
       return lines.join("\n         ");
     },
