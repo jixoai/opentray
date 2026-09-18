@@ -471,18 +471,28 @@ jobs:
       - name: Publish packages
         if: needs.plan-native.outputs.publish-enabled == 'true' && needs.prepare-release.outputs.channel == 'stable'
         # Trusted publishing (OIDC) is the release auth path. The npm-release
-        # environment's NODE_AUTH_TOKEN (a bypass-2FA publishing token) is
-        # deliberately UNSET for the publish child: npm's 2026-09 restriction
-        # stops such tokens from creating NEW package names (E404 on the
-        # first release of a package), and its presence in .npmrc shadows
-        # npm's native OIDC exchange. With the token unset, npm (>=11.5,
-        # id-token: write) authenticates each publish through the package's
-        # registered trusted publisher.
-        run: env -u NODE_AUTH_TOKEN pnpm run release
+        # environment injects a bypass-2FA publishing token through several
+        # channels (NODE_AUTH_TOKEN via setup-node's npmrc template, and
+        # possibly NPM_CONFIG_* env); npm's 2026-09 restriction stops such
+        # tokens from creating NEW package names (E404 on first release),
+        # and ANY residual token config shadows npm's native OIDC exchange.
+        # The publish child gets a clean npmrc and every token channel
+        # stripped: npm >=11.5 then authenticates each publish through the
+        # package's registered trusted publisher (id-token: write, changesets
+        # provenance: true).
+        run: |
+          printf 'registry=https://registry.npmjs.org/\n' > /tmp/publish-clean.npmrc
+          env -u NODE_AUTH_TOKEN -u NPM_TOKEN -u NPM_CONFIG__AUTH_TOKEN \
+            NPM_CONFIG_USERCONFIG=/tmp/publish-clean.npmrc \
+            pnpm run release
 
       - name: Publish alpha packages
         if: needs.prepare-release.outputs.has-changesets == 'true' && needs.prepare-release.outputs.channel == 'alpha'
-        run: env -u NODE_AUTH_TOKEN pnpm run release:alpha
+        run: |
+          printf 'registry=https://registry.npmjs.org/\n' > /tmp/publish-clean.npmrc
+          env -u NODE_AUTH_TOKEN -u NPM_TOKEN -u NPM_CONFIG__AUTH_TOKEN \
+            NPM_CONFIG_USERCONFIG=/tmp/publish-clean.npmrc \
+            pnpm run release:alpha
 
       - name: Backfill release tags
         if: needs.plan-native.outputs.publish-enabled == 'true' && needs.prepare-release.outputs.channel == 'stable'
