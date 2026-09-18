@@ -278,8 +278,19 @@ describe("@opentray/ext-opener", () => {
   it("dispatches bare non-special scheme URLs that new URL() accepts (no stricter than the oracle)", async () => {
     // `new URL("mailto:")` / `new URL("file:")` / `new URL("file:x")`
     // parse — the facade must dispatch them verbatim exactly like the
-    // native WHATWG gate, never a rejection.
-    const targets = ["mailto:", "file:", "file:x", "  https://example.com  "];
+    // native WHATWG gate, never a rejection. Tab/newline removal
+    // anywhere in the input and the C0 margin strip are parser-owned
+    // (implementation review I2b corpus rows, mirrored on the native
+    // side).
+    const targets = [
+      "mailto:",
+      "file:",
+      "file:x",
+      "  https://example.com  ",
+      "ht\ntps://example.com",
+      "https://exa\nmple.com",
+      "\u0000https://example.com",
+    ];
     const transport = new ScriptedTransport(
       targets.map(() => (frame: ExtCommandFrame) => immediateResult(frame.requestId))
     );

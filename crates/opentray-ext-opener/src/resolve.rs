@@ -67,42 +67,20 @@ fn is_ascii_alpha(byte: u8) -> bool {
 }
 
 /// True for the scheme continuation grammar `[A-Za-z0-9+.-]`.
-fn is_scheme_char(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'+' || byte == b'-' || byte == b'.'
-}
-
-/// WHATWG pre-parse trim: strips leading/trailing C0 controls and spaces —
-/// the same margin `new URL()` removes before parsing on the facade side.
-/// Classification-only: the dispatched target stays the original string.
-fn trim_url_margins(text: &str) -> &str {
-    text.trim_matches(|byte: char| (byte as u32) <= 0x20)
-}
-
-/// Scans `[A-Za-z][A-Za-z0-9+.-]*:` and returns the scheme in its
-/// original case, or `None` when the text has no scheme prefix.
-fn scan_scheme(text: &str) -> Option<&str> {
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    if bytes.is_empty() || !is_ascii_alpha(bytes[0]) {
-        return None;
-    }
-    index += 1;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if byte == b':' {
-            return Some(&text[..index]);
-        }
-        if !is_scheme_char(byte) {
-            return None;
-        }
-        index += 1;
-    }
-    None
-}
+// The lexical scheme scanner, its grammar helper, and the WHATWG margin
+// trim were removed with the parser-driven classification (implementation
+// review I2b): the url crate performs the identical pre-parse margin strip
+// plus the tab/newline removal anywhere in the input, so a separate
+// scanner could only diverge from the facade's `new URL()`.
 
 /// The frozen open() classification matrix. Pure; no platform awareness
 /// required (the facade platform always equals the native platform, and
 /// the matrix itself is platform-neutral about which FORM is absolute).
+/// URL detection is parser-driven (implementation review I2b): the full
+/// WHATWG parse decides URL-ness exactly like the facade's `new URL()` —
+/// including the pre-parse C0/space margin strip and the tab/newline
+/// removal ANYWHERE in the input (`"ht\ntps://x"` is an https URL). A
+/// lexical scheme scan is not equivalent and was removed.
 pub(crate) fn classify_target(target: &str) -> TargetKind {
     let bytes = target.as_bytes();
     if bytes.is_empty() {
@@ -124,9 +102,11 @@ pub(crate) fn classify_target(target: &str) -> TargetKind {
         // single-letter schemes, so no legal target is lost).
         return TargetKind::DriveRelative;
     }
-    if let Some(scheme) = scan_scheme(trim_url_margins(target)) {
+    if let Ok(parsed) = url::Url::parse(target) {
+        // `parsed.scheme()` is the canonical lowercase form — the same
+        // string the facade's `url.protocol` produces.
         return TargetKind::Url {
-            scheme: scheme.to_string(),
+            scheme: parsed.scheme().to_string(),
         };
     }
     TargetKind::Relative
@@ -148,33 +128,17 @@ pub(crate) fn validate_open_target(target: &str) -> Result<&str, TypedExtensionE
         TargetKind::PosixPath
         | TargetKind::DrivePath
         | TargetKind::UncPath => Ok(target),
-        TargetKind::Url { scheme: _scheme } => {
-            // Full WHATWG validity gate (implementation review I2 P1): a
-            // scheme-like prefix that does not parse as a URL takes the
-            // same relative rejection the facade's `new URL()` catch
-            // produces — never ShellExecuteW/NSWorkspace. The url crate
-            // implements the same WHATWG URL Standard as the facade, and
-            // it performs the identical C0/space margin + tab/newline
-            // stripping on the raw target, so classification and this
-            // gate cannot diverge.
-            let parsed = match url::Url::parse(target) {
-                Ok(parsed) => parsed,
-                Err(_) => {
-                    return Err(target_invalid_error(REASON_RELATIVE, target));
-                }
-            };
-            // `parsed.scheme()` is the canonical lowercase form — the
-            // same string the facade's `url.protocol` produces.
-            let canonical = parsed.scheme();
-            debug_assert_eq!(
-                canonical,
-                _scheme.to_ascii_lowercase(),
-                "the scanned scheme and the parsed scheme must agree"
-            );
-            if scheme_allowed(canonical) {
+        // The classification's WHATWG parse already IS the validity gate
+        // (implementation review I2/I2b): a scheme-like prefix that does
+        // not parse classifies Relative and takes the same typed
+        // rejection the facade's `new URL()` catch produces. The scheme
+        // here is the canonical lowercase parse result — the same string
+        // the facade's `url.protocol` produces.
+        TargetKind::Url { scheme } => {
+            if scheme_allowed(&scheme) {
                 Ok(target)
             } else {
-                Err(scheme_blocked_error(canonical, target))
+                Err(scheme_blocked_error(&scheme, target))
             }
         }
         TargetKind::DriveRelative => {
@@ -499,6 +463,8 @@ mod tests {
         }
         // The gate is exactly as permissive as `new URL()` — no stricter:
         // bare non-special schemes and opaque paths parse and dispatch.
+        // Tab/newline removal ANYWHERE and the C0 margin strip are
+        // parser-owned (implementation review I2b corpus rows).
         for target in [
             "https://example.com",
             "http://example.com/a?b=c",
@@ -509,6 +475,9 @@ mod tests {
             "file:x",
             "  https://example.com  ",
             "HTTP://EXAMPLE.COM",
+            "ht\ntps://example.com",
+            "https://exa\nmple.com",
+            "\u{0}https://example.com",
         ] {
             assert!(
                 validate_open_target(target).is_ok(),
@@ -517,7 +486,11 @@ mod tests {
         }
         // Valid URL with a non-allowlisted scheme stays the frozen
         // scheme-blocked rejection with the canonical lowercase scheme.
-        for (target, scheme) in [("https+x://h", "https+x"), ("ab:x", "ab")] {
+        for (target, scheme) in [
+            ("https+x://h", "https+x"),
+            ("ab:x", "ab"),
+            ("ab\n:x", "ab"),
+        ] {
             let error = validate_open_target(target).unwrap_err();
             assert_eq!(error.code, error_code::SCHEME_BLOCKED, "target: {target:?}");
             assert_eq!(error.details.as_ref().unwrap()["scheme"], scheme);
@@ -525,18 +498,26 @@ mod tests {
     }
 
     #[test]
-    fn url_forms_scan_the_scheme_lexically_with_case_preserved() {
+    fn url_classification_is_parser_driven_with_the_canonical_scheme() {
+        // The scheme in the classification is the WHATWG parse result —
+        // canonical lowercase, exactly the facade's `url.protocol`.
         for (target, scheme) in [
             ("https://example.com", "https"),
-            ("HTTPS://example.com", "HTTPS"),
+            ("HTTPS://example.com", "https"),
             ("http://example.com/a?b=c", "http"),
             ("file:///tmp/report.txt", "file"),
             ("mailto:user@example.com", "mailto"),
-            ("MailTo:user@example.com", "MailTo"),
+            ("MailTo:user@example.com", "mailto"),
             // WHATWG pre-parse margin trim (mirrors new URL() on the
             // facade); the dispatched target stays the original string.
             ("  https://example.com  ", "https"),
             ("\thttps://example.com\n", "https"),
+            // WHATWG removes tabs/newlines ANYWHERE in the input
+            // (implementation review I2b): `ht\ntps://x` is an https URL,
+            // never a relative string.
+            ("ht\ntps://example.com", "https"),
+            ("https://exa\nmple.com", "https"),
+            ("ab\n:x", "ab"),
         ] {
             assert_eq!(
                 classify(target),
@@ -546,8 +527,9 @@ mod tests {
                 "target: {target:?}"
             );
         }
-        // Scheme grammar: first char must be a letter, continuation is
-        // [A-Za-z0-9+.-], and the scheme must end with ':'.
+        // Non-URL forms: embedded SPACES are not stripped (unlike
+        // tab/newline), a digit-first prefix has no scheme, and a bare
+        // word without a colon is not a URL.
         assert_eq!(
             classify("1https://x"),
             TargetKind::Relative,
