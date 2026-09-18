@@ -26,7 +26,15 @@ export type NativeBuildTargetName =
   | "windows-arm64"
   | "windows-x64";
 
-export type NativeBuildComponent = "runtime" | "webview" | "badge" | "dialog" | "sound";
+export type NativeBuildComponent =
+  | "runtime"
+  | "webview"
+  | "badge"
+  | "dialog"
+  | "sound"
+  | "clipboard"
+  | "opener"
+  | "notification";
 export type NativeArtifactKind = NativeStageKind;
 export const badgeDynamicLibraryArtifactName = "libopentray_ext_badge.dylib";
 export const dialogDynamicLibraryArtifactName = "libopentray_ext_dialog.dylib";
@@ -164,6 +172,10 @@ const nativeBuildComponentOrder: readonly NativeBuildComponent[] = [
   "badge",
   "dialog",
   "sound",
+
+  "clipboard",
+  "opener",
+  "notification",
 ];
 
 const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentConfig> = {
@@ -214,6 +226,36 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
     // Embedded facade: no split per-platform packages exist to infer from.
     inferredPackagePrefixes: [],
   },
+  clipboard: {
+    component: "clipboard",
+    allowedTargets: soundNativeBuildTargets,
+    defaultReleaseTargets: soundNativeBuildTargets,
+    cargoPackages: ["opentray-ext-clipboard", extensionInspectorCargoPackage],
+    artifactKinds: ["clipboard"],
+    inferredPackages: ["@opentray/ext-clipboard"],
+    // Embedded facade: no split per-platform packages exist to infer from.
+    inferredPackagePrefixes: [],
+  },
+  opener: {
+    component: "opener",
+    allowedTargets: soundNativeBuildTargets,
+    defaultReleaseTargets: soundNativeBuildTargets,
+    cargoPackages: ["opentray-ext-opener", extensionInspectorCargoPackage],
+    artifactKinds: ["opener"],
+    inferredPackages: ["@opentray/ext-opener"],
+    // Embedded facade: no split per-platform packages exist to infer from.
+    inferredPackagePrefixes: [],
+  },
+  notification: {
+    component: "notification",
+    allowedTargets: soundNativeBuildTargets,
+    defaultReleaseTargets: soundNativeBuildTargets,
+    cargoPackages: ["opentray-ext-notification", extensionInspectorCargoPackage],
+    artifactKinds: ["notification"],
+    inferredPackages: ["@opentray/ext-notification"],
+    // Embedded facade: no split per-platform packages exist to infer from.
+    inferredPackagePrefixes: [],
+  },
 };
 
 export const nativeBuildTargetNames = allNativeBuildTargets;
@@ -261,6 +303,18 @@ export const inferNativeBuildComponentsFromReleasePackages = (
     }
     if (matchesReleasePackage("sound", releasePackage)) {
       inferred.add("sound");
+      continue;
+    }
+    if (matchesReleasePackage("clipboard", releasePackage)) {
+      inferred.add("clipboard");
+      continue;
+    }
+    if (matchesReleasePackage("opener", releasePackage)) {
+      inferred.add("opener");
+      continue;
+    }
+    if (matchesReleasePackage("notification", releasePackage)) {
+      inferred.add("notification");
       continue;
     }
     if (matchesReleasePackage("runtime", releasePackage)) {
@@ -546,6 +600,30 @@ export const releaseArtifactName = (
         return soundDynamicLibraryArtifactName;
       }
       throw new Error("sound native artifacts are not published for linux targets");
+    case "clipboard":
+      if (packageOs === "windows") {
+        return "opentray_ext_clipboard.dll";
+      }
+      if (packageOs === "darwin") {
+        return "libopentray_ext_clipboard.dylib";
+      }
+      throw new Error("clipboard native artifacts are not published for linux targets");
+    case "opener":
+      if (packageOs === "windows") {
+        return "opentray_ext_opener.dll";
+      }
+      if (packageOs === "darwin") {
+        return "libopentray_ext_opener.dylib";
+      }
+      throw new Error("opener native artifacts are not published for linux targets");
+    case "notification":
+      if (packageOs === "windows") {
+        return "opentray_ext_notification.dll";
+      }
+      if (packageOs === "darwin") {
+        return "libopentray_ext_notification.dylib";
+      }
+      throw new Error("notification native artifacts are not published for linux targets");
   }
 };
 
@@ -586,6 +664,15 @@ const resolvePackageDirForComponent = (
     case "sound":
       // Embedded facade: mirrors dialog (add-ext-sound design reference section 3).
       return "packages/ext-sound";
+    case "clipboard":
+      // Embedded facade: mirrors dialog (add-ext-clipboard design reference section 3).
+      return "packages/ext-clipboard";
+    case "opener":
+      // Embedded facade: mirrors dialog (add-ext-opener design reference section 3).
+      return "packages/ext-opener";
+    case "notification":
+      // Embedded facade: mirrors dialog (add-ext-notification design reference section 3).
+      return "packages/ext-notification";
   }
 };
 

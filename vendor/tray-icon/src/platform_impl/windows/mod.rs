@@ -290,6 +290,12 @@ impl TrayIcon {
     pub fn hwnd(&self) -> HWND {
         self.hwnd
     }
+
+    /// The per-icon registration id used with `Shell_NotifyIcon`
+    /// (completes the `(HWND, uID)` addressing pair).
+    pub fn internal_id(&self) -> u32 {
+        self.internal_id
+    }
 }
 
 impl Drop for TrayIcon {

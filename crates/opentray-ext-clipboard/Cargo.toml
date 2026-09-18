@@ -1,0 +1,42 @@
+[package]
+name = "opentray-ext-clipboard"
+description = "OpenTray native clipboard dynamic extension ABI provider."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+opentray-spec.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# macOS versions are aligned with opentray-ext-dialog/opentray-ext-sound
+# declarations (objc2-app-kit 0.3.x / objc2 0.6.x). NSPasteboard supplies
+# the general board surface (clearContents / setString:forType: /
+# stringForType:).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", features = [
+    "NSPasteboard",
+] }
+objc2-foundation = { version = "0.3.2", features = [
+    "NSObjCRuntime",
+    "NSObject",
+    "NSString",
+] }
+
+# Windows versions are aligned with opentray-ext-dialog/opentray-ext-sound
+# declarations (windows-sys 0.61.x). user32 clipboard and kernel32 global
+# memory are static imports; no WinRT surface.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+] }

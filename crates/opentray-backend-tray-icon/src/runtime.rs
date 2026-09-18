@@ -47,3 +47,48 @@ impl TrayIconRuntime for UnboundTrayIconRuntime {
         Err(BackendError::Unsupported("tray_icon_runtime_unbound"))
     }
 }
+
+/// Shared-handle delegation: broker composition may register one typed
+/// `Arc<R>` runtime handle with a composition-layer service while the kernel's
+/// `TrayIconBackend` keeps applying projections through the same runtime
+/// object. This is ownership plumbing only — every method forwards verbatim,
+/// so an `Arc`-wrapped runtime is behaviorally the wrapped runtime.
+impl<R: TrayIconRuntime> TrayIconRuntime for std::sync::Arc<R> {
+    fn apply_projection(&self, projection: TrayIconProjection) -> Result<(), BackendError> {
+        (**self).apply_projection(projection)
+    }
+
+    fn menu_event(&self, menu_id: &str) -> Option<TrayEvent> {
+        (**self).menu_event(menu_id)
+    }
+
+    fn primary_event(&self, tray_icon_id: &str) -> Option<TrayEvent> {
+        (**self).primary_event(tray_icon_id)
+    }
+
+    fn tray_click_event(
+        &self,
+        tray_icon_id: &str,
+        button: MouseButton,
+        x: i32,
+        y: i32,
+    ) -> Option<TrayEvent> {
+        (**self).tray_click_event(tray_icon_id, button, x, y)
+    }
+
+    fn tray_bounds(&self, tray_icon_id: &str) -> Result<Option<Rect>, BackendError> {
+        (**self).tray_bounds(tray_icon_id)
+    }
+
+    fn record_tray_interaction(&self, tray_icon_id: &str) {
+        (**self).record_tray_interaction(tray_icon_id)
+    }
+
+    fn show_menu(&self, app_id: &AppId) -> Result<(), BackendError> {
+        (**self).show_menu(app_id)
+    }
+
+    fn emit_event(&self, event: TrayEvent) -> Result<(), BackendError> {
+        (**self).emit_event(event)
+    }
+}

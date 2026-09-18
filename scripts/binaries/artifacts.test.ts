@@ -135,6 +135,47 @@ describe("Feature: native runtime artifact topology", () => {
     );
   });
 
+  test("Scenario: Given an embedded host-atom library file When the stage destination is resolved by file name Then every embedded facade owns its platforms path", () => {
+    // Regression pin for the false-green stage failure: the embedded
+    // by-file-name resolver only knew dialog and sound, so the CI stage job
+    // rejected libopentray_ext_clipboard.dylib even though the native job
+    // built and uploaded it.
+    const darwin = resolveNativePackageTarget("darwin", "arm64");
+    expect(
+      resolveStageDestinationForArtifactFile(
+        darwin,
+        "libopentray_ext_clipboard.dylib"
+      )
+    ).toBe(
+      "packages/ext-clipboard/platforms/darwin-arm64/libopentray_ext_clipboard.dylib"
+    );
+    expect(
+      resolveStageDestinationForArtifactFile(
+        darwin,
+        "libopentray_ext_opener.dylib"
+      )
+    ).toBe(
+      "packages/ext-opener/platforms/darwin-arm64/libopentray_ext_opener.dylib"
+    );
+    expect(
+      resolveStageDestinationForArtifactFile(
+        darwin,
+        "libopentray_ext_notification.dylib"
+      )
+    ).toBe(
+      "packages/ext-notification/platforms/darwin-arm64/libopentray_ext_notification.dylib"
+    );
+    const windows = resolveNativePackageTarget("windows", "x64");
+    expect(
+      resolveStageDestinationForArtifactFile(
+        windows,
+        "opentray_ext_notification.dll"
+      )
+    ).toBe(
+      "packages/ext-notification/platforms/win32-x64/opentray_ext_notification.dll"
+    );
+  });
+
   test("Scenario: Given badge release artifacts When the release name is resolved Then the macOS dylib and helper zip stay stable", () => {
     const target = resolveNativePackageTarget("darwin", "x64");
 

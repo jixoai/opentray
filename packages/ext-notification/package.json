@@ -1,0 +1,40 @@
+{
+  "name": "@opentray/ext-notification",
+  "version": "0.29.0",
+  "description": "Official OpenTray native notification extension: OS-standard host-side notifications through UNUserNotificationCenter or the registered tray icon's balloon/toast channel.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jixoai/opentray"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "contract.json",
+    "platforms",
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "opentray": ">=0.0.0"
+  },
+  "devDependencies": {
+    "@opentray/spec": "workspace:*",
+    "opentray": "workspace:*",
+    "tsdown": "^0.22.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7"
+  }
+}

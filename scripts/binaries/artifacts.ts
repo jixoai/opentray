@@ -9,7 +9,10 @@ export type NativeStageKind =
   | "webview"
   | "badge"
   | "dialog"
-  | "sound";
+  | "sound"
+  | "clipboard"
+  | "opener"
+  | "notification";
 // Darwin runtime packages publish only the bundle template. The runtime owns
 // materializing the caller-specific .app directory around the broker.
 export const darwinRuntimeCarrierArtifactName = "Info.plist";
@@ -43,6 +46,9 @@ export interface NativeTarget {
    * sound facade (`packages/ext-sound/platforms/<npm-target>/`).
    */
   soundArtifact?: string;
+  clipboardArtifact?: string;
+  openerArtifact?: string;
+  notificationArtifact?: string;
 }
 
 const packageTargets = [
@@ -102,6 +108,26 @@ export function createNativeTarget(
       : `packages/ext-sound/platforms/${npmOs}-${arch}/${
           packageOs === "windows" ? "opentray_ext_sound.dll" : "libopentray_ext_sound.dylib"
         }`;
+  const clipboardArtifact =
+    packageOs === "linux"
+      ? undefined
+      : `packages/ext-clipboard/platforms/${npmOs}-${arch}/${
+          packageOs === "windows" ? "opentray_ext_clipboard.dll" : "libopentray_ext_clipboard.dylib"
+        }`;
+  const openerArtifact =
+    packageOs === "linux"
+      ? undefined
+      : `packages/ext-opener/platforms/${npmOs}-${arch}/${
+          packageOs === "windows" ? "opentray_ext_opener.dll" : "libopentray_ext_opener.dylib"
+        }`;
+  const notificationArtifact =
+    packageOs === "linux"
+      ? undefined
+      : `packages/ext-notification/platforms/${npmOs}-${arch}/${
+          packageOs === "windows"
+            ? "opentray_ext_notification.dll"
+            : "libopentray_ext_notification.dylib"
+        }`;
   return {
     packageOs,
     npmOs,
@@ -129,6 +155,9 @@ export function createNativeTarget(
     badgeHelperArtifact,
     dialogArtifact,
     soundArtifact,
+    clipboardArtifact,
+    openerArtifact,
+    notificationArtifact,
   };
 }
 
@@ -219,6 +248,27 @@ export const resolveStageDestination = (
         );
       }
       return target.soundArtifact;
+    case "clipboard":
+      if (target.clipboardArtifact === undefined) {
+        throw new Error(
+          `target ${target.packageOs}-${target.arch} does not publish a clipboard native artifact`
+        );
+      }
+      return target.clipboardArtifact;
+    case "opener":
+      if (target.openerArtifact === undefined) {
+        throw new Error(
+          `target ${target.packageOs}-${target.arch} does not publish an opener native artifact`
+        );
+      }
+      return target.openerArtifact;
+    case "notification":
+      if (target.notificationArtifact === undefined) {
+        throw new Error(
+          `target ${target.packageOs}-${target.arch} does not publish a notification native artifact`
+        );
+      }
+      return target.notificationArtifact;
   }
 };
 
@@ -244,12 +294,19 @@ export const resolveStageDestinationForArtifactFile = (
   target: NativeTarget,
   fileName: string
 ): string => {
-  // Embedded extension staging (dialog, sound) is resolved per (target,
-  // kind): the library basenames are shared by darwin-arm64 and darwin-x64
-  // within their per-target artifact manifests, so the generic basename
-  // candidate list must not own these destinations (add-ext-dialog section
-  // 6.2 frozen layout, mirrored by add-ext-sound section 3).
-  for (const embeddedArtifact of [target.dialogArtifact, target.soundArtifact]) {
+  // Embedded extension staging (dialog, sound, clipboard, opener,
+  // notification) is resolved per (target, kind): the library basenames are
+  // shared by darwin-arm64 and darwin-x64 within their per-target artifact
+  // manifests, so the generic basename candidate list must not own these
+  // destinations (add-ext-dialog section 6.2 frozen layout, mirrored by
+  // add-ext-sound section 3 and the host-atoms family).
+  for (const embeddedArtifact of [
+    target.dialogArtifact,
+    target.soundArtifact,
+    target.clipboardArtifact,
+    target.openerArtifact,
+    target.notificationArtifact,
+  ]) {
     if (embeddedArtifact !== undefined && basename(embeddedArtifact) === fileName) {
       return embeddedArtifact;
     }

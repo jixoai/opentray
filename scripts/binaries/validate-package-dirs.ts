@@ -166,6 +166,9 @@ function createPackageEntryExpectations(): ReadonlyMap<string, readonly Required
   const embeddedFacadeKinds = [
     { dir: "packages/ext-dialog", artifactOf: (target: (typeof nativeTargets)[number]) => target.dialogArtifact },
     { dir: "packages/ext-sound", artifactOf: (target: (typeof nativeTargets)[number]) => target.soundArtifact },
+    { dir: "packages/ext-clipboard", artifactOf: (target: (typeof nativeTargets)[number]) => target.clipboardArtifact },
+    { dir: "packages/ext-opener", artifactOf: (target: (typeof nativeTargets)[number]) => target.openerArtifact },
+    { dir: "packages/ext-notification", artifactOf: (target: (typeof nativeTargets)[number]) => target.notificationArtifact },
   ] as const;
   for (const { dir, artifactOf } of embeddedFacadeKinds) {
     expectations.set(dir, [

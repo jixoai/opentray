@@ -44,6 +44,43 @@ describe("Feature: shared native build graph", () => {
     ).toEqual(["sound"]);
   });
 
+  test("Scenario: Given the embedded clipboard facade When components are inferred Then the clipboard atom is selected alone", () => {
+    expect(
+      inferNativeBuildComponentsFromReleasePackages(["@opentray/ext-clipboard"])
+    ).toEqual(["clipboard"]);
+  });
+
+  test("Scenario: Given the embedded opener facade When components are inferred Then the opener atom is selected alone", () => {
+    expect(
+      inferNativeBuildComponentsFromReleasePackages(["@opentray/ext-opener"])
+    ).toEqual(["opener"]);
+  });
+
+  test("Scenario: Given the embedded notification facade When components are inferred Then the notification atom is selected alone", () => {
+    expect(
+      inferNativeBuildComponentsFromReleasePackages(["@opentray/ext-notification"])
+    ).toEqual(["notification"]);
+  });
+
+  test("Scenario: Given the host-atom changeset When the verify plan resolves against pending packages Then every new atom joins the native matrix", () => {
+    // Regression pin for the false-green CI: the add-ext-host-atoms
+    // changeset (three embedded facades) must scope the verify plan to
+    // all eight components, and the embedded staging list must include
+    // all five embedded facades.
+    const inferred = inferNativeBuildComponentsFromReleasePackages([
+      "@opentray/ext-clipboard",
+      "@opentray/ext-opener",
+      "@opentray/ext-notification",
+      "opentray",
+    ]);
+    expect(inferred).toEqual([
+      "runtime",
+      "clipboard",
+      "opener",
+      "notification",
+    ]);
+  });
+
   test("Scenario: Given WebView and runtime atoms When a grouped execution is materialized Then preview families can still build one smoke closure", () => {
     const targets = resolveReleaseTargetsForComponents(["runtime", "webview"]);
     const [darwinArm64] = materializeNativeBuildExecutions(

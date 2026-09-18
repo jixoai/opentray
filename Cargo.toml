@@ -8,6 +8,9 @@ members = [
   "crates/opentray-ext-dialog",
   "crates/opentray-extension-inspector",
   "crates/opentray-ext-sound",
+    "crates/opentray-ext-clipboard",
+    "crates/opentray-ext-opener",
+    "crates/opentray-ext-notification",
   "crates/opentray-ext-webview",
   "crates/opentray-runtime-node",
   "crates/opentray-spec",
@@ -36,6 +39,7 @@ serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
 tray-icon = { version = "0.24.0", default-features = false }
+url = "2"
 
 # Patched tray-icon: preserve partially transparent RGBA pixels in the Windows HICON mask.
 [patch.crates-io]

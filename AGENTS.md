@@ -603,3 +603,89 @@ implementation batches A 8.8 / B 9.0 / C 9.1 GO). Design SSOT:
   the release evidence; a dry run is never release evidence. First receipts (PR #7, CI runs
   35225263870 / 35234464270): ext-dialog real pack 1,380,024 B (≈1.32 MiB), ext-sound
   1,064,261 B (≈1.02 MiB) — both under the 2 MB warning line, no Owner split decision owed.
+
+## Host Atom Extension Law (Clipboard, Opener, Notification)
+
+Established by `add-ext-clipboard`/`add-ext-opener`/`add-ext-notification` (2026-09-18).
+Design SSOT: `openspec/changes/add-ext-{clipboard,opener,notification}/plans/design-reference.md`.
+Finalized wording lands with those changes' archive; the shared dialog/sound family
+framework (embedded packaging, V2 Immediate ABI, `getBackend()` frozen `{type:"backend"}`
+snapshot, typed error-code details, embedded identity chain, Linux typed unsupported)
+applies unchanged and is not repeated here.
+
+### Notification (essentials)
+
+- `notify` is resolve-on-acceptance (the sound law): acceptance is the native call being
+  taken, never presentation. Payload bounds are one platform-independent contract in
+  UTF-16 code units — title ≤ 64, body ≤ 256, subtitle ≤ 64 — taken from the win32
+  balloon buffer's physical capacity; nothing is silently truncated, and the win32
+  subtitle degradation joins `subtitle + "—" + body` (em dash, no spaces; a subtitle
+  without a body stays alone) under one joint post-join 256 limit.
+- win32 notify is a composition-layer tray-icon bridge (frozen O1=B): it reuses the
+  caller's already-registered tray icon channel — one `Shell_NotifyIconW(NIM_MODIFY,
+  NIF_INFO)` on the same `(HWND, uID)` registration, `NIIF_NOSOUND` when silent — with
+  no new window and no new identity atom. Routing goes through the broker-composition
+  generic capability table (`crates/opentray-bin/src/host_capabilities.rs`: one static
+  data entry per (capability, command, platform); the matcher compares fields, never
+  literals; registration is additive). `opentray-core` stays product-neutral: the
+  core-neutrality grep gate must show no capability-word special casing in kernel
+  dispatch (e.g. no `ext == "notification"` branch). A scope with no live registered
+  icon rejects typed `notification_tray_absent`; a native FALSE rejects typed
+  `notification_failed` carrying the win32 error code. One balloon slot per icon:
+  multi-mount (and rapid) notifications replace the earlier one (latest-state channel).
+- darwin authorization commands are the first non-modal reuse of the DeferredOperation
+  transaction (no new ABI symbols): UNUserNotificationCenter callbacks hop the main
+  queue into the owner loop; a never-arriving callback times out after the frozen 10 s
+  into typed `notification_failed` (`reason:"authorization-timeout"`); the outcome, the
+  timeout, and the session-close cancel branch race exactly one one-shot CAS terminal.
+  win32 answers both authorization commands Immediate (always granted / always true)
+  with zero deferred frames; the facade accepts either settle shape on either platform.
+- denied linearization snapshot law: `notify` acceptance decides in one owner-loop frame
+  against the cached last authorization snapshot keyed by
+  `(appId, trayId, sessionId, instanceGeneration)`; a denied snapshot rejects typed
+  `notification_denied` (`{status}`) with ZERO native posts; a first snapshot-less
+  notify runs its authorization query inside the 10 s budget, then posts. Snapshots are
+  never trusted across sessions and session close drops them.
+
+### Clipboard (essentials)
+
+- The UTF-16 contract is frozen on `String.length` semantics: the write cap is
+  1,048,576 UTF-16 code units (1 MiB) enforced in facade preflight; a lone surrogate
+  rejects typed (`reason:"lone-surrogate"`, `index`) — replacement writes are forbidden
+  because they break read-back round-trip fidelity. `readText` has no return cap and
+  resolves `null` for a text-less board — the null empty-state is a first-class value,
+  never an error and never `""` (same law family as picker cancel=null).
+- HGLOBAL ownership law (win32): a write allocates `GlobalAlloc(GMEM_MOVEABLE)`, copies
+  NUL-terminated UTF-16, and hands the handle to `SetClipboardData` — after a successful
+  handoff the system owns the HGLOBAL and the extension never frees it (double-free
+  class error); on any failure path the extension must `GlobalFree` every allocated,
+  un-handed-off handle before reporting the typed error. A read locks the returned
+  HGLOBAL, deep-copies, unlocks, and never frees or touches it after `CloseClipboard` —
+  the deep copy is `readText`'s only retained artifact.
+- Retry discipline (win32, frozen): retry `OpenClipboard` only when the failure is
+  `ERROR_ACCESS_DENIED`, inside a monotonic 2000 ms total budget from command dispatch,
+  backoff ladder 10→20→40→80→160→200 ms capped, every sleep clipped to the remaining
+  budget; other open failures reject typed immediately (`clipboard_unavailable` with
+  `osErrorCode`); exhaustion rejects typed `clipboard_locked` (`{attempts, elapsedMs}`).
+  Open→operate→Close closes within one command — never hold the clipboard across
+  commands. darwin needs no retry (AppKit serializes NSPasteboard on the owner thread).
+
+### Opener (essentials)
+
+- The v1 scheme allowlist is frozen at `http/https/file/mailto` (case-insensitive):
+  host-side input may be external data and custom scheme handlers carry
+  persistent-registration side effects. Relaxation is strictly a future additive
+  change; tightening would break existing callers.
+- Legal targets dispatch verbatim: absolute POSIX/drive/UNC paths and `\\?\` literals
+  pass with no normalization (normalization is the caller's job; this layer rejects
+  semantically ambiguous input such as `C:x` drive-relative rather than guessing);
+  `file:` URLs never convert to paths; existence is not an acceptance precondition.
+  win32 acceptance is `ShellExecuteW` returning > 32 (≤ 32 rejects typed
+  `opener_failed` with `{shellExecuteResult, reason?}` from the SE_ERR table); darwin
+  acceptance is the `NSWorkspace.open` boolean (`{osError:true}` on failure), while
+  `activateFileViewerSelectingURLs` is void and accepted by definition.
+- `/select` rejection set + root trim law: `revealInFolder` rejects paths containing a
+  quote or any C0 control character (reject, never escape — an escaping matrix is a
+  standing attack surface); trims exactly one trailing separator only when the result
+  is still a legal absolute path; roots (`/`, `C:\`, `\\server\share\`, `\\?\` roots)
+  are never trimmed and reveal by opening the root itself.

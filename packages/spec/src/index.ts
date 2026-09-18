@@ -1110,3 +1110,166 @@ export type SoundErrorDetails =
     }
   | { kind: "format"; path: string; reason: string }
   | { kind: "unreadable"; path: string };
+
+// ---------------------------------------------------------------------------
+// Clipboard extension shared schema (add-ext-clipboard design reference)
+// ---------------------------------------------------------------------------
+
+/** Frozen clipboard write bound: 1 MiB = 1,048,576 UTF-16 code units. */
+export const CLIPBOARD_MAX_WRITE_UTF16 = 1_048_576;
+
+/** Shared clipboard backend capabilities DTO (add-ext-clipboard design reference). */
+export interface ClipboardBackendCapabilities {
+  platform: "darwin" | "win32";
+  /** v1 is text-only; the format catalog is a v2 extension point. */
+  textOnly: true;
+  /** Frozen platform-independent write bound (UTF-16 code units). */
+  maxWriteUtf16: typeof CLIPBOARD_MAX_WRITE_UTF16;
+  /** win32 = true (bounded open-retry discipline); darwin = false (AppKit serializes). */
+  boundedOpenRetry: boolean;
+}
+
+/** Returns true when an unknown value is a complete clipboard backend capabilities DTO. */
+export const isClipboardBackendCapabilities = (
+  value: unknown
+): value is ClipboardBackendCapabilities => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    (record.platform === "darwin" || record.platform === "win32") &&
+    record.textOnly === true &&
+    record.maxWriteUtf16 === CLIPBOARD_MAX_WRITE_UTF16 &&
+    typeof record.boundedOpenRetry === "boolean"
+  );
+};
+
+/** Frozen clipboard typed-error code set (add-ext-clipboard design reference section 3). */
+export const CLIPBOARD_ERROR_CODES = {
+  platformUnsupported: "clipboard_platform_unsupported",
+  locked: "clipboard_locked",
+  unavailable: "clipboard_unavailable",
+  payloadTooLarge: "clipboard_payload_too_large",
+  payloadInvalid: "clipboard_payload_invalid",
+} as const;
+
+export type ClipboardErrorCode = (typeof CLIPBOARD_ERROR_CODES)[keyof typeof CLIPBOARD_ERROR_CODES];
+
+export const isClipboardErrorCode = (value: string): value is ClipboardErrorCode =>
+  Object.values(CLIPBOARD_ERROR_CODES).includes(value as ClipboardErrorCode);
+
+// ---------------------------------------------------------------------------
+// Opener extension shared schema (add-ext-opener design reference)
+// ---------------------------------------------------------------------------
+
+/** Frozen v1 scheme allowlist (lowercase canonical; matched case-insensitively). */
+export const OPENER_ALLOWED_SCHEMES = ["http", "https", "file", "mailto"] as const;
+
+export type OpenerAllowedScheme = (typeof OPENER_ALLOWED_SCHEMES)[number];
+
+export const isOpenerAllowedScheme = (value: string): value is OpenerAllowedScheme =>
+  (OPENER_ALLOWED_SCHEMES as readonly string[]).includes(value.toLowerCase()) === true;
+
+/** Shared opener backend capabilities DTO (add-ext-opener design reference). */
+export interface OpenerBackendCapabilities {
+  platform: "darwin" | "win32";
+  allowedSchemes: typeof OPENER_ALLOWED_SCHEMES;
+  supportsRevealInFolder: true;
+}
+
+/** Returns true when an unknown value is a complete opener backend capabilities DTO. */
+export const isOpenerBackendCapabilities = (
+  value: unknown
+): value is OpenerBackendCapabilities => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.platform !== "darwin" && record.platform !== "win32") {
+    return false;
+  }
+  if (
+    !Array.isArray(record.allowedSchemes) ||
+    record.allowedSchemes.length !== OPENER_ALLOWED_SCHEMES.length ||
+    !(record.allowedSchemes as unknown[]).every((scheme, index) => scheme === OPENER_ALLOWED_SCHEMES[index])
+  ) {
+    return false;
+  }
+  return record.supportsRevealInFolder === true;
+};
+
+/** Frozen opener typed-error code set (add-ext-opener design reference section 3). */
+export const OPENER_ERROR_CODES = {
+  platformUnsupported: "opener_platform_unsupported",
+  targetInvalid: "opener_target_invalid",
+  schemeBlocked: "opener_scheme_blocked",
+  failed: "opener_failed",
+} as const;
+
+export type OpenerErrorCode = (typeof OPENER_ERROR_CODES)[keyof typeof OPENER_ERROR_CODES];
+
+export const isOpenerErrorCode = (value: string): value is OpenerErrorCode =>
+  Object.values(OPENER_ERROR_CODES).includes(value as OpenerErrorCode);
+
+// ---------------------------------------------------------------------------
+// Notification extension shared schema (add-ext-notification design reference)
+// ---------------------------------------------------------------------------
+
+/** Frozen notification payload bounds (UTF-16 code units; platform-independent common subset). */
+export const NOTIFICATION_TITLE_LIMIT_UTF16 = 64;
+export const NOTIFICATION_BODY_LIMIT_UTF16 = 256;
+export const NOTIFICATION_SUBTITLE_LIMIT_UTF16 = 64;
+
+export type NotificationAuthorizationStatus =
+  | "granted"
+  | "denied"
+  | "notDetermined";
+
+export type NotificationAuthorizationModel = "user" | "always-granted";
+export type NotificationChannel = "user-notification-center" | "tray-icon-info";
+
+/** Shared notification backend capabilities DTO (add-ext-notification design reference section 3). */
+export interface NotificationBackendCapabilities {
+  platform: "darwin" | "win32";
+  authorizationModel: NotificationAuthorizationModel;
+  channel: NotificationChannel;
+  titleLimitUtf16: typeof NOTIFICATION_TITLE_LIMIT_UTF16;
+  bodyLimitUtf16: typeof NOTIFICATION_BODY_LIMIT_UTF16;
+  subtitleLimitUtf16: typeof NOTIFICATION_SUBTITLE_LIMIT_UTF16;
+  supportsSubtitle: boolean;
+}
+
+/** Returns true when an unknown value is a complete notification backend capabilities DTO. */
+export const isNotificationBackendCapabilities = (
+  value: unknown
+): value is NotificationBackendCapabilities => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    (record.platform === "darwin" || record.platform === "win32") &&
+    (record.authorizationModel === "user" || record.authorizationModel === "always-granted") &&
+    (record.channel === "user-notification-center" || record.channel === "tray-icon-info") &&
+    record.titleLimitUtf16 === NOTIFICATION_TITLE_LIMIT_UTF16 &&
+    record.bodyLimitUtf16 === NOTIFICATION_BODY_LIMIT_UTF16 &&
+    record.subtitleLimitUtf16 === NOTIFICATION_SUBTITLE_LIMIT_UTF16 &&
+    typeof record.supportsSubtitle === "boolean"
+  );
+};
+
+/** Frozen notification typed-error code set (add-ext-notification design reference section 3). */
+export const NOTIFICATION_ERROR_CODES = {
+  platformUnsupported: "notification_platform_unsupported",
+  denied: "notification_denied",
+  payloadInvalid: "notification_payload_invalid",
+  trayAbsent: "notification_tray_absent",
+  failed: "notification_failed",
+} as const;
+
+export type NotificationErrorCode =
+  (typeof NOTIFICATION_ERROR_CODES)[keyof typeof NOTIFICATION_ERROR_CODES];
+
+export const isNotificationErrorCode = (value: string): value is NotificationErrorCode =>
+  Object.values(NOTIFICATION_ERROR_CODES).includes(value as NotificationErrorCode);

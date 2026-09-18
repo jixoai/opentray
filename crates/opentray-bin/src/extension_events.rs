@@ -61,11 +61,15 @@ impl ExtensionDispatch {
 }
 
 /// A `LoadExt` frame observed before kernel dispatch, identified by the same
-/// instance name the kernel registry keys on (`mountId` or `name`).
+/// instance name the kernel registry keys on (`mountId` or `name`), carrying
+/// the declared extension name for host-capability routing (implementation
+/// review I3b P0: the ExtCommand wire carries the mount id, routes match
+/// the declared name).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LoadedExtension {
     pub(crate) app_id: AppId,
     pub(crate) instance: String,
+    pub(crate) declared_name: String,
 }
 
 impl LoadedExtension {
@@ -79,6 +83,7 @@ impl LoadedExtension {
             } => Some(Self {
                 app_id: app_id.clone(),
                 instance: mount_id.clone().unwrap_or_else(|| name.clone()),
+                declared_name: name.clone(),
             }),
             _ => None,
         }
@@ -421,18 +426,6 @@ mod tests {
                 scope: ExtensionScope {
                     app_id: self.app_id.clone(),
                     tray_id: Some(self.tray_id.clone()),
-                    ext: self.instance.clone(),
-                },
-                data: serde_json::json!({ "type": r#type }),
-                command_scope: None,
-            }
-        }
-
-        fn owned_envelope_to(&self, r#type: &str, tray_id: &str) -> ExtensionEnvelope {
-            ExtensionEnvelope {
-                scope: ExtensionScope {
-                    app_id: self.app_id.clone(),
-                    tray_id: Some(tray_id.to_string()),
                     ext: self.instance.clone(),
                 },
                 data: serde_json::json!({ "type": r#type }),
@@ -1140,6 +1133,7 @@ mod tests {
             LoadedExtension {
                 app_id: "app-a".to_string(),
                 instance: "push".to_string(),
+                declared_name: "push".to_string(),
             },
             "session-1".to_string(),
         );
@@ -1147,6 +1141,7 @@ mod tests {
             LoadedExtension {
                 app_id: "app-b".to_string(),
                 instance: "push".to_string(),
+                declared_name: "push".to_string(),
             },
             "session-2".to_string(),
         );
