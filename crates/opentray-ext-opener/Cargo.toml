@@ -1,0 +1,45 @@
+[package]
+name = "opentray-ext-opener"
+description = "OpenTray native opener dynamic extension ABI provider."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+opentray-spec.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# macOS versions are aligned with opentray-ext-dialog's declarations
+# (objc2-app-kit 0.3.x / objc2 0.6.x). NSWorkspace supplies the default-app
+# open surface (openURL:) and the Finder reveal surface
+# (activateFileViewerSelectingURLs:); NSURL/NSArray/NSString build the
+# arguments.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", features = [
+    "NSWorkspace",
+] }
+objc2-foundation = { version = "0.3.2", features = [
+    "NSArray",
+    "NSObjCRuntime",
+    "NSObject",
+    "NSString",
+    "NSURL",
+] }
+
+# Windows versions are aligned with opentray-ext-dialog's declarations
+# (windows-sys 0.61.x). ShellExecuteW is a static shell32 import; the owner
+# thread's apartment initialization is the broker's process-level discipline
+# (frozen contract: no CoInitialize/CoUninitialize compensation here).
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
