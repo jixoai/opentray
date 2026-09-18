@@ -751,16 +751,6 @@ mod tests {
             }
         }
 
-        /// Runs every queued hop job (the delayed-callback drain).
-        fn drain_hops(&self) -> usize {
-            let jobs: Vec<OwnerJob> = self.hops.borrow_mut().drain(..).collect();
-            let count = jobs.len();
-            for job in jobs {
-                job();
-            }
-            count
-        }
-
         fn queued(&self) -> (usize, usize) {
             (self.hops.borrow().len(), self.timeouts.borrow().len())
         }

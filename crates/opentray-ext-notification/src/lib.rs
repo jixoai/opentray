@@ -785,6 +785,7 @@ mod tests {
         detail
     }
 
+    #[cfg(target_os = "macos")]
     fn parse_events(events: &ExtOwnedBytes) -> Vec<ExtensionEnvelope> {
         assert!(!events.ptr.is_null(), "immediate answers carry events");
         let bytes = unsafe { std::slice::from_raw_parts(events.ptr.cast::<u8>(), events.len) };

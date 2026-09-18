@@ -135,7 +135,7 @@ impl NotifyContent {
         self.subtitle.as_deref()
     }
 
-    #[cfg_attr(all(not(target_os = "macos"), not(test)), allow(dead_code))]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn is_silent(&self) -> bool {
         self.silent.unwrap_or(false)
     }
