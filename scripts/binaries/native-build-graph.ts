@@ -305,6 +305,18 @@ export const inferNativeBuildComponentsFromReleasePackages = (
       inferred.add("sound");
       continue;
     }
+    if (matchesReleasePackage("clipboard", releasePackage)) {
+      inferred.add("clipboard");
+      continue;
+    }
+    if (matchesReleasePackage("opener", releasePackage)) {
+      inferred.add("opener");
+      continue;
+    }
+    if (matchesReleasePackage("notification", releasePackage)) {
+      inferred.add("notification");
+      continue;
+    }
     if (matchesReleasePackage("runtime", releasePackage)) {
       inferred.add("runtime");
     }
