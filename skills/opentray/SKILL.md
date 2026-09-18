@@ -40,6 +40,9 @@ real behavior, and diagnose the installed runtime graph.
 - Official WebView extension usage, overlay titlebar safe-area computation, and native drag regions: read `references/ext-webview.md`.
 - OS-standard modal dialogs (message boxes, file/directory/save pickers) for host-side callers without a visible page: read `references/ext-dialog.md`.
 - OS-standard sound feedback (system beep, named system sounds, low-cost file playback) for host-side callers: read `references/ext-sound.md`.
+- System clipboard text atoms (read/write/clear, the 1 MiB UTF-16 cap, the null empty state) for host-side callers: read `references/ext-clipboard.md`.
+- Opening URLs/absolute file paths with the default application or revealing them in the file manager: read `references/ext-opener.md`.
+- OS-standard notifications (title/body payloads, darwin authorization, the win32 tray-icon balloon channel) for host-side callers: read `references/ext-notification.md`.
 - Multi-webview windows (toolbar + content composition), declarative layout, message channels, and per-view events: read `references/ext-webview.md` plus `references/backend-ipc.md`.
 - Exposing backend capabilities to a trusted toolbar page over a message channel, or the create-opentray native toolbar carrier (`--toolbar`, both application forms): read `references/backend-ipc.md`.
 - Common local issues and capability limits: read `references/troubleshooting.md`.
