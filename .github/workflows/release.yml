@@ -493,11 +493,9 @@ jobs:
           fi
           printf 'registry=https://registry.npmjs.org/\n' > /tmp/publish-clean.npmrc
           # Direct changeset binary (bypasses `pnpm run`'s npm_config_* env
-          # injection, the last suspected shadow over npm's OIDC detection)
-          # with silly logging so the npm auth decision is visible.
+          # injection, which shadowed npm's OIDC detection).
           env -u NODE_AUTH_TOKEN -u NPM_TOKEN -u NPM_CONFIG__AUTH_TOKEN \
             NPM_CONFIG_USERCONFIG=/tmp/publish-clean.npmrc \
-            npm_config_loglevel=silly \
             ./node_modules/.bin/changeset publish
 
       - name: Publish alpha packages
