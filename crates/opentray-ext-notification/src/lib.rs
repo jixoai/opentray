@@ -1514,7 +1514,7 @@ mod tests {
             // Payload-invalid (joined body 257): the payload error wins.
             let content = options::NotifyContent {
                 title: "t".to_string(),
-                body: Some("b".repeat(191)),
+                body: Some("b".repeat(192)),
                 subtitle: Some("s".repeat(64)),
                 silent: None,
             };

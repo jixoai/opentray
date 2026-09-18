@@ -72,7 +72,11 @@ pub(crate) const SUBTITLE_LIMIT_UTF16: u32 = 64;
 /// subtitle is joined into the body PREFIX). Frozen crate-side so the
 /// facade's projection and the native defense-in-depth check count the
 /// same joined string; the combined-join limit is 256 UTF-16 units.
-pub(crate) const WIN32_SUBTITLE_JOIN_SEPARATOR: &str = "\n\n";
+// Frozen to the facade's win32 subtitle join form (add-ext-notification
+// facade shared.ts: `${subtitle}—${body}`) — the crate's join is the
+// defense-in-depth projection and MUST be byte-identical to the facade's
+// so the combined-<=256 law validates the same string both layers build.
+pub(crate) const WIN32_SUBTITLE_JOIN_SEPARATOR: &str = "\u{2014}";
 
 /// `NotificationAuthorizationStatus` (design section 1):
 /// `'granted' | 'denied' | 'notDetermined'`.
@@ -549,9 +553,9 @@ mod tests {
     /// field there.
     #[test]
     fn win32_join_is_jointly_validated_never_truncated() {
-        // subtitle 64 + separator 2 + body 191 = 257 joined: over.
-        // Per-field: subtitle 64 (ok), body 191 (ok).
-        let joined_over = content("t", Some(&"b".repeat(191)), Some(&"s".repeat(64)));
+        // subtitle 64 + separator 1 (em-dash) + body 192 = 257 joined: over.
+        // Per-field: subtitle 64 (ok), body 192 (ok).
+        let joined_over = content("t", Some(&"b".repeat(192)), Some(&"s".repeat(64)));
         let error = validate_notify_payload(&joined_over, PayloadProjection::Win32).unwrap_err();
         assert_eq!(error.code, error_code::PAYLOAD_INVALID);
         let details = error.details.unwrap();
@@ -570,7 +574,7 @@ mod tests {
         // The joined projection itself is the frozen prefix form.
         assert_eq!(
             win32_joined_body(&content("t", Some("body"), Some("sub"))),
-            "sub\n\nbody"
+            "sub\u{2014}body"
         );
         assert_eq!(win32_joined_body(&content("t", Some("body"), None)), "body");
     }
