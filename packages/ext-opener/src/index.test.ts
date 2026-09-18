@@ -258,6 +258,44 @@ describe("@opentray/ext-opener", () => {
     }
   });
 
+  it("rejects malformed URL prefixes as relative typed rejections (the new URL() oracle)", async () => {
+    // Mirrors the native WHATWG parse gate corpus (implementation review
+    // I2 P1): a scheme-like prefix that `new URL()` cannot parse is the
+    // relative rejection on BOTH sides — the native lexical scan alone
+    // used to pass these through to ShellExecuteW.
+    const transport = new ScriptedTransport();
+    const opener = attachTestOpener("win32", transport);
+    for (const target of ["http:", "http://", "http://[invalid", "https://exa mple.com"]) {
+      const rejection = opener.open(target);
+      await expect(rejection).rejects.toBeInstanceOf(OpenerError);
+      const error = (await rejection.catch((caught: unknown) => caught)) as OpenerError;
+      expect(error.code).toBe(OPENER_ERROR_CODES.targetInvalid);
+      expect(error.details).toEqual({ reason: "relative" });
+    }
+    expect(transport.frames).toHaveLength(0);
+  });
+
+  it("dispatches bare non-special scheme URLs that new URL() accepts (no stricter than the oracle)", async () => {
+    // `new URL("mailto:")` / `new URL("file:")` / `new URL("file:x")`
+    // parse — the facade must dispatch them verbatim exactly like the
+    // native WHATWG gate, never a rejection.
+    const targets = ["mailto:", "file:", "file:x", "  https://example.com  "];
+    const transport = new ScriptedTransport(
+      targets.map(() => (frame: ExtCommandFrame) => immediateResult(frame.requestId))
+    );
+    const opener = attachTestOpener("win32", transport);
+    for (const target of targets) {
+      await opener.open(target);
+    }
+    const commands = transport.frames.filter(
+      (frame): frame is Extract<ClientRequestFrame, { type: "ext-command" }> =>
+        frame.type === "ext-command"
+    );
+    expect(commands.map((frame) => frame.data)).toEqual(
+      targets.map((target) => ({ type: "open", target }))
+    );
+  });
+
   it("never treats existence as an acceptance precondition (missing paths dispatch)", async () => {
     const transport = new ScriptedTransport([(frame) => immediateResult(frame.requestId)]);
     const opener = attachTestOpener("darwin", transport);

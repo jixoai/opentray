@@ -14,6 +14,10 @@ crate-type = ["cdylib", "rlib"]
 opentray-spec.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# WHATWG URL parser — the native URL validity gate must be isomorphic
+# with the facade's `new URL()` (implementation review I2 P1); a lexical
+# scheme scan is not equivalent (http:, http://, http://[invalid).
+url.workspace = true
 
 # macOS versions are aligned with opentray-ext-dialog's declarations
 # (objc2-app-kit 0.3.x / objc2 0.6.x). NSWorkspace supplies the default-app

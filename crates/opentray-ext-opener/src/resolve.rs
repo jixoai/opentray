@@ -148,16 +148,33 @@ pub(crate) fn validate_open_target(target: &str) -> Result<&str, TypedExtensionE
         TargetKind::PosixPath
         | TargetKind::DrivePath
         | TargetKind::UncPath => Ok(target),
-        TargetKind::Url { scheme } => {
-            if scheme_allowed(&scheme) {
+        TargetKind::Url { scheme: _scheme } => {
+            // Full WHATWG validity gate (implementation review I2 P1): a
+            // scheme-like prefix that does not parse as a URL takes the
+            // same relative rejection the facade's `new URL()` catch
+            // produces — never ShellExecuteW/NSWorkspace. The url crate
+            // implements the same WHATWG URL Standard as the facade, and
+            // it performs the identical C0/space margin + tab/newline
+            // stripping on the raw target, so classification and this
+            // gate cannot diverge.
+            let parsed = match url::Url::parse(target) {
+                Ok(parsed) => parsed,
+                Err(_) => {
+                    return Err(target_invalid_error(REASON_RELATIVE, target));
+                }
+            };
+            // `parsed.scheme()` is the canonical lowercase form — the
+            // same string the facade's `url.protocol` produces.
+            let canonical = parsed.scheme();
+            debug_assert_eq!(
+                canonical,
+                _scheme.to_ascii_lowercase(),
+                "the scanned scheme and the parsed scheme must agree"
+            );
+            if scheme_allowed(canonical) {
                 Ok(target)
             } else {
-                // Canonical lowercase — isomorphic with the facade's
-                // `url.protocol` detail (the URL parser lowercases).
-                Err(scheme_blocked_error(
-                    &scheme.to_ascii_lowercase(),
-                    target,
-                ))
+                Err(scheme_blocked_error(canonical, target))
             }
         }
         TargetKind::DriveRelative => {
@@ -454,6 +471,57 @@ mod tests {
             error.details.as_ref().unwrap(),
             &serde_json::json!({ "reason": "drive-relative" })
         );
+    }
+
+    #[test]
+    fn malformed_url_prefixes_take_the_facade_relative_rejection() {
+        // Implementation review I2 P1: the lexical scheme scan alone let
+        // these prefixes through to ShellExecuteW/NSWorkspace while the
+        // facade's `new URL()` rejected them. The WHATWG parse gate
+        // restores the isomorphism — a scheme-like prefix that does not
+        // parse is the same `relative` typed rejection the facade's catch
+        // fallthrough produces. Corpus verified against `new URL()` on
+        // Node (the facade oracle) — the url crate implements the same
+        // WHATWG URL Standard, so both sides must agree on every row.
+        for target in [
+            "http:",
+            "http://",
+            "http://[invalid",
+            "https://exa mple.com",
+        ] {
+            let error = validate_open_target(target).unwrap_err();
+            assert_eq!(error.code, error_code::TARGET_INVALID, "target: {target:?}");
+            assert_eq!(
+                error.details.as_ref().unwrap(),
+                &serde_json::json!({ "reason": "relative" }),
+                "target: {target:?}"
+            );
+        }
+        // The gate is exactly as permissive as `new URL()` — no stricter:
+        // bare non-special schemes and opaque paths parse and dispatch.
+        for target in [
+            "https://example.com",
+            "http://example.com/a?b=c",
+            "file:///tmp/report.txt",
+            "mailto:user@example.com",
+            "mailto:",
+            "file:",
+            "file:x",
+            "  https://example.com  ",
+            "HTTP://EXAMPLE.COM",
+        ] {
+            assert!(
+                validate_open_target(target).is_ok(),
+                "must dispatch verbatim: {target:?}"
+            );
+        }
+        // Valid URL with a non-allowlisted scheme stays the frozen
+        // scheme-blocked rejection with the canonical lowercase scheme.
+        for (target, scheme) in [("https+x://h", "https+x"), ("ab:x", "ab")] {
+            let error = validate_open_target(target).unwrap_err();
+            assert_eq!(error.code, error_code::SCHEME_BLOCKED, "target: {target:?}");
+            assert_eq!(error.details.as_ref().unwrap()["scheme"], scheme);
+        }
     }
 
     #[test]
