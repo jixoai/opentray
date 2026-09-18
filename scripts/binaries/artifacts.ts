@@ -11,7 +11,8 @@ export type NativeStageKind =
   | "dialog"
   | "sound"
   | "clipboard"
-  | "opener";
+  | "opener"
+  | "notification";
 // Darwin runtime packages publish only the bundle template. The runtime owns
 // materializing the caller-specific .app directory around the broker.
 export const darwinRuntimeCarrierArtifactName = "Info.plist";
@@ -47,6 +48,7 @@ export interface NativeTarget {
   soundArtifact?: string;
   clipboardArtifact?: string;
   openerArtifact?: string;
+  notificationArtifact?: string;
 }
 
 const packageTargets = [
@@ -118,6 +120,14 @@ export function createNativeTarget(
       : `packages/ext-opener/platforms/${npmOs}-${arch}/${
           packageOs === "windows" ? "opentray_ext_opener.dll" : "libopentray_ext_opener.dylib"
         }`;
+  const notificationArtifact =
+    packageOs === "linux"
+      ? undefined
+      : `packages/ext-notification/platforms/${npmOs}-${arch}/${
+          packageOs === "windows"
+            ? "opentray_ext_notification.dll"
+            : "libopentray_ext_notification.dylib"
+        }`;
   return {
     packageOs,
     npmOs,
@@ -147,6 +157,7 @@ export function createNativeTarget(
     soundArtifact,
     clipboardArtifact,
     openerArtifact,
+    notificationArtifact,
   };
 }
 
@@ -251,6 +262,13 @@ export const resolveStageDestination = (
         );
       }
       return target.openerArtifact;
+    case "notification":
+      if (target.notificationArtifact === undefined) {
+        throw new Error(
+          `target ${target.packageOs}-${target.arch} does not publish a notification native artifact`
+        );
+      }
+      return target.notificationArtifact;
   }
 };
 

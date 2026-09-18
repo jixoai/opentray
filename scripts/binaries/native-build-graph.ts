@@ -33,7 +33,8 @@ export type NativeBuildComponent =
   | "dialog"
   | "sound"
   | "clipboard"
-  | "opener";
+  | "opener"
+  | "notification";
 export type NativeArtifactKind = NativeStageKind;
 export const badgeDynamicLibraryArtifactName = "libopentray_ext_badge.dylib";
 export const dialogDynamicLibraryArtifactName = "libopentray_ext_dialog.dylib";
@@ -174,6 +175,7 @@ const nativeBuildComponentOrder: readonly NativeBuildComponent[] = [
 
   "clipboard",
   "opener",
+  "notification",
 ];
 
 const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentConfig> = {
@@ -241,6 +243,16 @@ const nativeBuildComponents: Record<NativeBuildComponent, NativeBuildComponentCo
     cargoPackages: ["opentray-ext-opener", extensionInspectorCargoPackage],
     artifactKinds: ["opener"],
     inferredPackages: ["@opentray/ext-opener"],
+    // Embedded facade: no split per-platform packages exist to infer from.
+    inferredPackagePrefixes: [],
+  },
+  notification: {
+    component: "notification",
+    allowedTargets: soundNativeBuildTargets,
+    defaultReleaseTargets: soundNativeBuildTargets,
+    cargoPackages: ["opentray-ext-notification", extensionInspectorCargoPackage],
+    artifactKinds: ["notification"],
+    inferredPackages: ["@opentray/ext-notification"],
     // Embedded facade: no split per-platform packages exist to infer from.
     inferredPackagePrefixes: [],
   },
@@ -592,6 +604,14 @@ export const releaseArtifactName = (
         return "libopentray_ext_opener.dylib";
       }
       throw new Error("opener native artifacts are not published for linux targets");
+    case "notification":
+      if (packageOs === "windows") {
+        return "opentray_ext_notification.dll";
+      }
+      if (packageOs === "darwin") {
+        return "libopentray_ext_notification.dylib";
+      }
+      throw new Error("notification native artifacts are not published for linux targets");
   }
 };
 
@@ -638,6 +658,9 @@ const resolvePackageDirForComponent = (
     case "opener":
       // Embedded facade: mirrors dialog (add-ext-opener design reference section 3).
       return "packages/ext-opener";
+    case "notification":
+      // Embedded facade: mirrors dialog (add-ext-notification design reference section 3).
+      return "packages/ext-notification";
   }
 };
 

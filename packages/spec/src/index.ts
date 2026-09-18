@@ -1211,3 +1211,65 @@ export type OpenerErrorCode = (typeof OPENER_ERROR_CODES)[keyof typeof OPENER_ER
 
 export const isOpenerErrorCode = (value: string): value is OpenerErrorCode =>
   Object.values(OPENER_ERROR_CODES).includes(value as OpenerErrorCode);
+
+// ---------------------------------------------------------------------------
+// Notification extension shared schema (add-ext-notification design reference)
+// ---------------------------------------------------------------------------
+
+/** Frozen notification payload bounds (UTF-16 code units; platform-independent common subset). */
+export const NOTIFICATION_TITLE_LIMIT_UTF16 = 64;
+export const NOTIFICATION_BODY_LIMIT_UTF16 = 256;
+export const NOTIFICATION_SUBTITLE_LIMIT_UTF16 = 64;
+
+export type NotificationAuthorizationStatus =
+  | "granted"
+  | "denied"
+  | "notDetermined";
+
+export type NotificationAuthorizationModel = "user" | "always-granted";
+export type NotificationChannel = "user-notification-center" | "tray-icon-info";
+
+/** Shared notification backend capabilities DTO (add-ext-notification design reference section 3). */
+export interface NotificationBackendCapabilities {
+  platform: "darwin" | "win32";
+  authorizationModel: NotificationAuthorizationModel;
+  channel: NotificationChannel;
+  titleLimitUtf16: typeof NOTIFICATION_TITLE_LIMIT_UTF16;
+  bodyLimitUtf16: typeof NOTIFICATION_BODY_LIMIT_UTF16;
+  subtitleLimitUtf16: typeof NOTIFICATION_SUBTITLE_LIMIT_UTF16;
+  supportsSubtitle: boolean;
+}
+
+/** Returns true when an unknown value is a complete notification backend capabilities DTO. */
+export const isNotificationBackendCapabilities = (
+  value: unknown
+): value is NotificationBackendCapabilities => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    (record.platform === "darwin" || record.platform === "win32") &&
+    (record.authorizationModel === "user" || record.authorizationModel === "always-granted") &&
+    (record.channel === "user-notification-center" || record.channel === "tray-icon-info") &&
+    record.titleLimitUtf16 === NOTIFICATION_TITLE_LIMIT_UTF16 &&
+    record.bodyLimitUtf16 === NOTIFICATION_BODY_LIMIT_UTF16 &&
+    record.subtitleLimitUtf16 === NOTIFICATION_SUBTITLE_LIMIT_UTF16 &&
+    typeof record.supportsSubtitle === "boolean"
+  );
+};
+
+/** Frozen notification typed-error code set (add-ext-notification design reference section 3). */
+export const NOTIFICATION_ERROR_CODES = {
+  platformUnsupported: "notification_platform_unsupported",
+  denied: "notification_denied",
+  payloadInvalid: "notification_payload_invalid",
+  trayAbsent: "notification_tray_absent",
+  failed: "notification_failed",
+} as const;
+
+export type NotificationErrorCode =
+  (typeof NOTIFICATION_ERROR_CODES)[keyof typeof NOTIFICATION_ERROR_CODES];
+
+export const isNotificationErrorCode = (value: string): value is NotificationErrorCode =>
+  Object.values(NOTIFICATION_ERROR_CODES).includes(value as NotificationErrorCode);

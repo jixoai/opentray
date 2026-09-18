@@ -20,7 +20,8 @@ export type ExtensionArtifactKind =
   | "dialog"
   | "sound"
   | "clipboard"
-  | "opener";
+  | "opener"
+  | "notification";
 
 export interface ExtensionArtifactTarget {
   readonly os: string;
@@ -182,7 +183,8 @@ export const isExtensionArtifactKind = (value: string): value is ExtensionArtifa
       value === "dialog" ||
       value === "sound" ||
       value === "clipboard" ||
-      value === "opener";
+      value === "opener" ||
+      value === "notification";
 
 /**
  * Embedded extension kinds (add-ext-dialog section 6.2; add-ext-sound section
@@ -197,7 +199,8 @@ export const isEmbeddedExtensionArtifactKind = (
   kind === "dialog" ||
   kind === "sound" ||
   kind === "clipboard" ||
-  kind === "opener";
+  kind === "opener" ||
+  kind === "notification";
 
 const parseEmbeddedExtensionManifest = (value: unknown): EmbeddedExtensionManifest => {
   if (
