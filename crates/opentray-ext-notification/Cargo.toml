@@ -1,0 +1,46 @@
+[package]
+name = "opentray-ext-notification"
+description = "OpenTray native notification dynamic extension ABI provider."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+opentray-spec.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# macOS versions are aligned with opentray-ext-dialog/opentray-ext-sound
+# declarations (objc2 0.6.x / objc2-foundation 0.3.x / dispatch2 0.3.x /
+# block2 0.6.x). UNUserNotificationCenter supplies the authorization
+# callbacks (libdispatch queues) and the delivery channel; dispatch2
+# marshals every callback back to the owner (main) thread.
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = { version = "0.6", default-features = false, features = ["alloc"] }
+dispatch2 = "0.3.1"
+objc2 = "0.6.4"
+objc2-foundation = { version = "0.3.2", features = [
+    "NSError",
+    "NSObject",
+    "NSString",
+] }
+objc2-user-notifications = { version = "0.3.2", features = [
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationSettings",
+    "UNNotificationSound",
+    "UNNotificationTrigger",
+    "UNUserNotificationCenter",
+    "block2",
+] }
+
+# win32 carries NO native dependency surface in this crate: notify is owned
+# by the broker-internal tray-notification bridge (design section 2 win32
+# ruling), and the auth commands are the documented always-granted
+# Immediate degradation — pure JSON projections through the generic FFI
+# path, exactly like the identity/manifest obligations.

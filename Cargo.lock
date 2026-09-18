@@ -2226,7 +2226,10 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
 dependencies = [
+ "bitflags 2.11.1",
+ "block2 0.6.2",
  "objc2 0.6.4",
+ "objc2-core-location 0.3.2",
  "objc2-foundation 0.3.2",
 ]
 
@@ -2346,6 +2349,20 @@ dependencies = [
  "serde_json",
  "windows",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "opentray-ext-notification"
+version = "0.0.0"
+dependencies = [
+ "block2 0.6.2",
+ "dispatch2",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+ "objc2-user-notifications 0.3.2",
+ "opentray-spec",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
