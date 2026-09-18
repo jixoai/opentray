@@ -159,7 +159,8 @@ mod tests {
             // Trim boundaries: exactly one trailing separator.
             ("C:\\foo\\", "/select,\"C:\\foo\""),
             ("C:\\foo/", "/select,\"C:\\foo\""),
-            ("/foo/", "/select,\"/foo\""),
+            // Mixed separator win32-absolute form with trailing slash.
+            ("C:/foo/", "/select,\"C:/foo\""),
             ("\\\\server\\share\\file.txt\\", "/select,\"\\\\server\\share\\file.txt\""),
             ("\\\\?\\C:\\temp\\file.txt\\", "/select,\"\\\\?\\C:\\temp\\file.txt\""),
             ("C:\\foo\\\\", "/select,\"C:\\foo\\\""),
