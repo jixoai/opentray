@@ -1,5 +1,13 @@
 # @create-opentray/core
 
+## 0.1.21
+
+### Patch Changes
+
+- @opentray/icon@0.30.2
+- @opentray/spec@0.30.2
+- @opentray/packaging@0.30.2
+
 ## 0.1.20
 
 ### Patch Changes

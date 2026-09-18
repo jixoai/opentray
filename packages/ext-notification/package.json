@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-notification",
-  "version": "0.30.1",
+  "version": "0.30.2",
   "description": "Official OpenTray native notification extension: OS-standard host-side notifications through UNUserNotificationCenter or the registered tray icon's balloon/toast channel.",
   "type": "module",
   "license": "MIT",
