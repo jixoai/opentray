@@ -99,6 +99,11 @@ pub(crate) fn resolve_host_capability(
 /// registration), so the seams carry no thread-safety bound.
 pub(crate) struct HostServices {
     tray_notification: TrayNotificationSeam,
+    /// (app id, instance/mount name) → declared route capability, observed
+    /// at acknowledged load time (see `note_extension_mount`). Owner-loop
+    /// single-threaded by the HostServices law, so interior mutability
+    /// carries no thread-safety bound.
+    capability_mounts: std::cell::RefCell<std::collections::HashMap<(String, String), &'static str>>,
 }
 
 impl HostServices {
@@ -114,6 +119,7 @@ impl HostServices {
     ) -> Self {
         Self {
             tray_notification: TrayNotificationSeam::compose_native(tray_runtime),
+            capability_mounts: Default::default(),
         }
     }
 
@@ -121,13 +127,56 @@ impl HostServices {
     pub(crate) fn new() -> Self {
         Self {
             tray_notification: TrayNotificationSeam::compose_native(),
+            capability_mounts: Default::default(),
         }
     }
 
     /// Test/composition constructor over an explicit seam.
     #[cfg(test)]
     pub(crate) fn from_tray_notification(tray_notification: TrayNotificationSeam) -> Self {
-        Self { tray_notification }
+        Self {
+            tray_notification,
+            capability_mounts: Default::default(),
+        }
+    }
+
+    /// Load-time capability→mount observation (implementation review I3b
+    /// P0): the ExtCommand wire carries the MOUNT id (the instance name,
+    /// e.g. `notification.<trayId>.<ordinal>`), while route entries are
+    /// keyed by the extension's DECLARED name. When a load is
+    /// acknowledged, record which mounted instance speaks which route
+    /// capability. The match is table-driven — no capability word appears
+    /// in this method. Entries live for the broker process (phase 1 has
+    /// no extension unload protocol); a stale entry can only reroute a
+    /// command whose instance name no longer exists, which the kernel
+    /// answers with its own not-found error either way.
+    pub(crate) fn note_extension_mount(
+        &self,
+        app_id: &str,
+        instance: &str,
+        declared_name: &str,
+    ) {
+        for route in HOST_CAPABILITY_ROUTES {
+            if route.capability == declared_name {
+                self.capability_mounts
+                    .borrow_mut()
+                    .insert((app_id.to_string(), instance.to_string()), route.capability);
+                return;
+            }
+        }
+    }
+
+    /// Translates one ExtCommand `ext` value (the mount/instance name) to
+    /// the declared capability name a route matches, when that instance
+    /// was loaded from a matching extension. Untranslated values return
+    /// unchanged — an explicit mount whose id equals the declared name
+    /// matches directly.
+    fn capability_for_dispatch<'a>(&self, app_id: &str, ext: &'a str) -> &'a str {
+        self.capability_mounts
+            .borrow()
+            .get(&(app_id.to_string(), ext.to_string()))
+            .copied()
+            .unwrap_or(ext)
     }
 }
 
@@ -191,7 +240,11 @@ pub(crate) fn compose_host_capability_frames<B: AppBackend, L: ExtensionLoader>(
     let Some(command) = command_type_of(data) else {
         return None;
     };
-    let Some(handler) = resolve_host_capability(ext, command, platform) else {
+    // The wire `ext` is the MOUNT id (instance name), not the declared
+    // extension name: translate through the acknowledged-load map first
+    // (implementation review I3b P0), then match the static table.
+    let capability = services.capability_for_dispatch(app_id, ext);
+    let Some(handler) = resolve_host_capability(capability, command, platform) else {
         return None;
     };
 

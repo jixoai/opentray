@@ -166,6 +166,24 @@ fn payload_invalid(field: &str, reason: String) -> HostCapabilityOutcome {
     }
 }
 
+/// The frozen bounds-rejection details shape of the family
+/// (`{field, lengthUtf16, limit}` — isomorphic with the facade preflight
+/// and the DLL's defense-in-depth validator).
+fn payload_invalid_bounds(field: &str, length_utf16: usize, limit: usize) -> HostCapabilityOutcome {
+    HostCapabilityOutcome::Failed {
+        code: NOTIFICATION_PAYLOAD_INVALID.to_string(),
+        message: format!(
+            "notification {field} carries {length_utf16} UTF-16 code units; the frozen \
+             platform-independent limit is {limit} — rejected, never truncated"
+        ),
+        details: Some(serde_json::json!({
+            "field": field,
+            "lengthUtf16": length_utf16,
+            "limit": limit,
+        })),
+    }
+}
+
 fn parse_notify_command(data: &Value) -> Result<NotifyCommand<'_>, HostCapabilityOutcome> {
     let title = match data.get("title") {
         Some(Value::String(title)) if !title.is_empty() => title.as_str(),
@@ -208,6 +226,21 @@ fn parse_notify_command(data: &Value) -> Result<NotifyCommand<'_>, HostCapabilit
             ));
         }
     };
+    // The frozen UTF-16 bounds are enforced HERE too (implementation
+    // review I3b P1): a raw-protocol caller that bypassed the facade
+    // preflight gets the typed family rejection with zero native calls —
+    // never a silent capacity clamp. The balloon capacities are the
+    // physical NOTIFYICONDATAW limits and equal the frozen contract.
+    let title_len = title.encode_utf16().count();
+    if title_len > TITLE_CAPACITY_UTF16 {
+        return Err(payload_invalid_bounds("title", title_len, TITLE_CAPACITY_UTF16));
+    }
+    if let Some(body) = body {
+        let body_len = body.encode_utf16().count();
+        if body_len > BODY_CAPACITY_UTF16 {
+            return Err(payload_invalid_bounds("body", body_len, BODY_CAPACITY_UTF16));
+        }
+    }
     Ok(NotifyCommand {
         title,
         body,
@@ -216,10 +249,11 @@ fn parse_notify_command(data: &Value) -> Result<NotifyCommand<'_>, HostCapabilit
 }
 
 /// Copies UTF-16 code units verbatim into a fixed balloon field: all units
-/// up to the array capacity, then a NUL only if a slot remains. Preflight
-/// guarantees the frozen boundary, so conforming values never lose a unit;
-/// the capacity clamp plus diagnostic only guards raw-protocol callers that
-/// bypassed the facade (buffer safety, not re-truncation policy).
+/// up to the array capacity, then a NUL only if a slot remains. The typed
+/// bounds rejection in `parse_notify_command` enforces the frozen contract
+/// before any native call (implementation review I3b P1), so conforming
+/// values never lose a unit; this capacity clamp is pure buffer safety for
+/// a hypothetical future mismatch — never the truncation policy.
 fn fill_balloon_field(
     field: &str,
     buffer: &mut [u16],
@@ -508,6 +542,10 @@ mod tests {
                 ..Self::default()
             }
         }
+
+        fn call_count(&self) -> usize {
+            self.calls.lock().expect("spy invoker lock").len()
+        }
     }
 
     impl NotifyIconInvoker for SpyInvoker {
@@ -637,6 +675,49 @@ mod tests {
                 "payload {payload}"
             );
         }
+    }
+
+    #[test]
+    fn over_limit_payloads_reject_typed_bounds_with_zero_native_calls() {
+        // Implementation review I3b P1: the bridge enforces the frozen
+        // UTF-16 bounds itself — a raw-protocol caller that bypassed the
+        // facade preflight gets the typed family rejection with the exact
+        // bounds details, and no native call happens (no channel
+        // resolution, no Shell_NotifyIconW) — never a silent clamp.
+        let channels = SpyChannels::default();
+        channels.register(&scope("app-1", "tray-1", "session-1"), CHANNEL);
+        let invoker = SpyInvoker::default();
+        let service = seam(channels.clone(), invoker.clone());
+        for (payload, field, length, limit) in [
+            (notify_payload(&"t".repeat(65), None, false), "title", 65, 64),
+            (
+                notify_payload("t", Some(&"b".repeat(257)), false),
+                "body",
+                257,
+                256,
+            ),
+        ] {
+            let outcome = tray_notification_bridge(&dispatch(
+                scope("app-1", "tray-1", "session-1"),
+                &payload,
+                &service,
+            ));
+            let HostCapabilityOutcome::Failed { code, details, .. } = outcome else {
+                panic!("payload {payload} must reject typed");
+            };
+            assert_eq!(code, NOTIFICATION_PAYLOAD_INVALID, "payload {payload}");
+            assert_eq!(
+                details,
+                Some(serde_json::json!({
+                    "field": field,
+                    "lengthUtf16": length,
+                    "limit": limit,
+                })),
+                "payload {payload}"
+            );
+        }
+        assert_eq!(invoker.call_count(), 0, "no native modify call");
+        assert_eq!(channels.seen_count(), 0, "no channel resolution");
     }
 
     #[test]
@@ -1029,6 +1110,68 @@ mod tests {
             ("app-1", "tray-1", "notification")
         );
         assert_eq!(*data, serde_json::json!({ "type": "result", "op": "notify" }));
+    }
+
+    #[test]
+    fn compose_routes_generated_mount_ids_after_the_acknowledged_load() {
+        // Implementation review I3b P0: the ExtCommand wire carries the
+        // MOUNT id (`notification.<trayId>.<ordinal>` for default mounts),
+        // not the declared extension name. Only instances observed at
+        // acknowledged load time route to the bridge; the answer still
+        // carries the caller's mount id in its scopes.
+        let (broker, session) = initialized_broker_with_tray();
+        let (services, channels) = compose_services(&session_id_of(&session));
+        services.note_extension_mount("app-1", "notification.tray-1.1", "notification");
+        let mounted_frame = ClientFrame::ExtCommand {
+            request_id: "req-1".to_string(),
+            app_id: "app-1".to_string(),
+            tray_id: "tray-1".to_string(),
+            ext: "notification.tray-1.1".to_string(),
+            data: notify_payload("Title", Some("Body"), false),
+        };
+        let frames = compose_host_capability_frames(
+            &broker,
+            &session,
+            &mounted_frame,
+            &services,
+            HostPlatform::Win32,
+        )
+        .expect("a generated mount id routes to the bridge after its acknowledged load");
+        assert_eq!(channels.seen_count(), 1);
+        let ServerFrame::ExtCommandResult { events, .. } = &frames[0] else {
+            panic!("first frame must be the immediate result");
+        };
+        assert_eq!(events[0].scope.ext, "notification.tray-1.1");
+
+        // An unobserved generated id (never loaded) falls through to the
+        // kernel.
+        let frame = ClientFrame::ExtCommand {
+            request_id: "req-1".to_string(),
+            app_id: "app-1".to_string(),
+            tray_id: "tray-1".to_string(),
+            ext: "notification.tray-9.9".to_string(),
+            data: notify_payload("Title", None, false),
+        };
+        assert!(
+            compose_host_capability_frames(&broker, &session, &frame, &services, HostPlatform::Win32)
+                .is_none(),
+            "an unobserved mount id must fall through to the kernel"
+        );
+        // A foreign-declared mount observed at load time still never
+        // routes (table-driven match, not name-prefix matching).
+        services.note_extension_mount("app-1", "clipboard.tray-1.2", "clipboard");
+        let frame = ClientFrame::ExtCommand {
+            request_id: "req-1".to_string(),
+            app_id: "app-1".to_string(),
+            tray_id: "tray-1".to_string(),
+            ext: "clipboard.tray-1.2".to_string(),
+            data: notify_payload("Title", None, false),
+        };
+        assert!(
+            compose_host_capability_frames(&broker, &session, &frame, &services, HostPlatform::Win32)
+                .is_none(),
+            "a non-capability declared name must never route"
+        );
     }
 
     #[test]

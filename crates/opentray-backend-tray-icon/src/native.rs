@@ -21,7 +21,9 @@ use objc2_foundation::{NSData, NSProcessInfo, NSRect, NSString};
 use opentray_core::BackendError;
 #[cfg(target_os = "windows")]
 use opentray_spec::geometry::DpiScale;
-use opentray_spec::{AppIcon, AppIconSource, AppId, MouseButton, TrayEvent};
+use opentray_spec::{AppId, MouseButton, TrayEvent};
+#[cfg(target_os = "macos")]
+use opentray_spec::{AppIcon, AppIconSource};
 use tray_icon::menu::{
     CheckMenuItem, Menu as NativeMenu, MenuItem as NativeMenuItem, PredefinedMenuItem, Submenu,
 };

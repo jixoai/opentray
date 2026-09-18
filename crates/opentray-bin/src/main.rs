@@ -954,6 +954,11 @@ mod native_broker {
                     session.write_frames(frames);
                     if let (Some(loaded), Some(owner)) = (loaded, kernel_session_id.as_deref()) {
                         if load_acknowledged {
+                            self.host_services.note_extension_mount(
+                                &loaded.app_id,
+                                &loaded.instance,
+                                &loaded.declared_name,
+                            );
                             self.extension_events
                                 .note_loaded(loaded.clone(), owner.to_string());
                             // Only a successful LoadExt ACK opens the source
