@@ -1,5 +1,11 @@
 # @opentray/esbuild-plugin
 
+## 0.30.0
+
+### Patch Changes
+
+- @opentray/packaging@0.30.0
+
 ## 0.29.0
 
 ### Patch Changes

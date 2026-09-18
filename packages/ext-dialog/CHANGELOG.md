@@ -1,5 +1,7 @@
 # @opentray/ext-dialog
 
+## 0.30.0
+
 ## 0.29.0
 
 ### Minor Changes
