@@ -524,6 +524,16 @@ impl TrayIcon {
         self.tray.borrow().hwnd()
     }
 
+    /// Get the tray icon's registration `(HWND, uID)` identity pair **Windows only**.
+    ///
+    /// `Shell_NotifyIcon` addressing requires BOTH the owning window handle
+    /// and the per-icon registration id; the handle alone is ambiguous when
+    /// one window hosts several tray icons. Valid as long as the tray icon.
+    #[cfg(windows)]
+    pub fn registration_id(&self) -> u32 {
+        self.tray.borrow().internal_id()
+    }
+
     /// Get the tray icon's underlying [NSStatusItem](objc2_app_kit::NSStatusItem) **macOS only**.
     ///
     /// Returns `None` if the status item is not available.
