@@ -56,8 +56,8 @@
   - 证据：edd516bd。
 - [x] 7.2 skills/opentray references/ext-notification.md + README（五要件：安装/完整 API/错误码 details/平台降级矩阵/最小示例）。
   - 证据：a5e2b3ef；五要件自检 d5559a37。
-- [ ] 7.3 self-review + check ok:true + Codex 复核至 GO（含 O1/O2 落档核验）。
-  - 进展：self-review d5559a37；I3 全链复核（crate+桥+缝）与 I4 综合 GO 进行中。
+- [x] 7.3 self-review + check ok:true + Codex 复核至 GO（含 O1/O2 落档核验）。
+  - 证据：self-review 终稿（I3a/I3b/I4 复核轮记录）；vision check ok:true；O1/O2 裁决 R2 已核；I4 终裁实现分 **9.2**（R2 9.0），release GO 无阻塞。
 - [x] 7.4 changeset（minor）。
   - 证据：.changeset/nine-otters-host.md。
 

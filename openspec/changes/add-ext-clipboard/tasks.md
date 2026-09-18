@@ -53,8 +53,8 @@
   - 证据：edd516bd。
 - [x] 7.2 skills/opentray 公共消费文档 references/ext-clipboard.md + README（安装/完整 API 面/错误码 details/平台边界/最小示例五要件齐备）。
   - 证据：a5e2b3ef；五要件对照自检 d5559a37。
-- [ ] 7.3 self-review + check ok:true + Codex 复核至 GO。
-  - 进展：self-review d5559a37；I1 P1 已闭合（修复+双平台复验）；I2b 闭合裁决与 I4 综合 GO 进行中。
+- [x] 7.3 self-review + check ok:true + Codex 复核至 GO。
+  - 证据：self-review 终稿（复核轮记录 + 真机法则修正）；vision check ok:true；I1 P1 闭合（56de08c7）；I4 终裁实现分 **9.4**（R2 9.2），release GO 无阻塞。
 - [x] 7.4 changeset（minor）。
   - 证据：.changeset/nine-otters-host.md（三原子合并 minor，fixed family → 0.30.0）。
 

@@ -1,7 +1,8 @@
-# add-ext-notification — Self-Review（实现阶段 + 复核轮进行中）
+# add-ext-notification — Self-Review（实现阶段 + 复核轮收口）
 
-> 评审人：编排者。对象：实现（facade + shared schema + 原生 crate + broker 桥 + 打包）。
-> 性质：**实现自评 + 复核轮记录**——I3 全链复核与 I4 综合裁决进行中，本档不代勾。
+> 评审人：编排者。对象：实现（facade + shared schema + 原生 crate + broker 桥 + 打包）+ Codex 复核轮。
+> 性质：**实现自评 + 复核轮记录**——I4 终裁：I3b CLOSED，notification 9.2（R2 9.0 → 实现复核链 I3a/I3b
+> 两轮 P0/P1 全部修复闭合），release GO 无阻塞。
 
 ## 总判定
 
@@ -39,26 +40,32 @@ contract.json）。
   快照不作跨会话信任，session close 清除。
 - Linux typed 拒、零 broker 帧；未知 attach 选项字段 TypeError。
 
-## 复核轮记录（进行中）
+## 复核轮记录（I3a + I3b + I4，全闭合）
 
-- 实现复核 I3（crate+桥+缝全链）排队中；I1/I2 的家族共性缺口（getBackend ABI 往返、
-  ERROR_SLOT 互斥、词法 vs 规范解析同构）在本 crate 的对应面已由既有夹具/测试覆盖
-  （getBackend {type:"backend"} 往返夹具、ERROR_SLOT_TESTS 互斥、payload 矩阵）。
-- 卫生修正 78750e9f：Windows lib-test 三个 dead-code 警告清除（drain_hops 删除、
-  parse_events cfg-gate macos、is_silent allow 门修正）——darwin 34/34、
-  Windows 31/31、交叉 ×2 0 警告复验。
+- **I3a P0（wire 形状，真阻断）**：facade 发嵌套 `{type:"notify", options:{...}}` 而 native/桥解码
+  扁平字段——CLI 原样转发，真实 notify 必败（mock transport 自证一致漏网）。修复 53673428：
+  wire 扁平化双侧钉字面量（facade 精确全等帧断言 + crate 反序列化夹具证明嵌套包装永不解码）。
+- **I3a P1（join 漂移）**：crate `win32_joined_body` 无条件追加 em-dash，subtitle-only 产生尾随
+  `subtitle—`；facade 语义为独立。修复：两侧统一按 body 非空分支，字节 parity 测试（含空 body 行）。
+- **I3b P0（桥路由，真阻断）**：路由按声明名字面量匹配 wire 的 mount id——默认生成式
+  `notification.<tray>.<ordinal>` 与显式 mount 全部绕过桥。修复 875af2b8：HostServices 加载期
+  观察表（LoadExt ACK 登记 declared_name→mount，表驱动零字面量）+ compose 翻译后匹配；
+  compose 级测试钉生成式路由与两类 fall-through。
+- **I3b P1（桥截断）**：桥自身无 UTF-16 校验，超限静默 clamp。修复：64/256 typed 拒绝
+  （{field,lengthUtf16,limit}）先于通道解析与原生调用；clamp 降级为纯缓冲安全。
+- 卫生：78750e9f dead-code 清理；backend AppIcon cfg-gate（windows 交叉 unused-import）。
+- **I4 终裁**：三 P0/P1 全 CLOSED；notification 实现分 9.2；release GO。
 
 ## 已知边界（诚实声明）
 
-1. I3/I4 Codex 复核进行中——GO 前本档自评不构成第三方对抗结论。
-2. 双平台真机 GUI 腿（通知横幅实际出现、darwin 授权弹窗首次出现、Win10 前经典
-   气球形态）属交互面，列 Owner 真机清单；命令面/授权面/payload 矩阵/DTO 已由
-   双平台测试与 spy 覆盖（darwin 34/34×5、Windows 31/31、bin 137/122）。
-3. 6.2 全量门 CI run 链接于 PR 后回填。
+1. 双平台真机 GUI 腿（通知横幅实际出现、darwin 授权弹窗首次出现、Win10 前经典
+   气球形态）属交互面，列 Owner 真机清单；命令面/授权面/payload 矩阵/DTO/桥路由已由
+   双平台测试与 spy 覆盖（crate 35/35 darwin、32/32 Windows 真机；bin 139/126；facade 22/22×2）。
+2. 6.2 全量门 CI run 链接于 PR 后回填。
 
 ## Git 证据
 
 - 实现波：48cda22d（crate）+ 0e6055b8（分隔符对齐）+ 216d5a79（facade）+
   5a713a1c/6b5b3fc7（bin 桥 + backend 缝）+ bb5ad8b9（vendored 访问器）+
   ce3d2f41（spec + 打包注册）。
-- 复核期修正：78750e9f（dead-code 卫生）。
+- 复核修复：53673428（I3a P0+P1）+ 875af2b8（I3b P0+P1）+ 78750e9f（卫生）。
