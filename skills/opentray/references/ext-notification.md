@@ -190,3 +190,9 @@ Every typed rejection is a `NotificationError` with a stable `code` and structur
 
 The shared transport-close code surfaces unchanged; the frozen notification family
 defines no transport alias.
+
+## Manual Acceptance
+
+In the OpenTray source tree, `pnpm --filter opentray example:hostAtoms` runs the tray-menu
+acceptance panel covering every notification API surface and typed rejection with console
+evidence blocks (see `packages/cli/examples/EXAMPLE.md`, Host-Atoms Acceptance Panel).

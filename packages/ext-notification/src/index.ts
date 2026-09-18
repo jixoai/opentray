@@ -274,15 +274,25 @@ function createNotificationCapability(
       if (issue !== null) {
         throw notificationErrorFromDescriptor(issue);
       }
-      // Resolve-on-acceptance: the immediate result IS the acceptance; the
-      // win32 broker-internal tray-notification bridge answers with the same
-      // immediate shape (design reference section 2, O1 ruling B). The
+      // Resolve-on-acceptance over BOTH settle shapes (design reference
+      // sections 1-2): win32's broker-internal tray bridge and darwin WITH
+      // an authorization snapshot answer Immediate; darwin's FIRST
+      // snapshot-less notify defers — the authorization query runs inside
+      // the 10 s budget and the terminal resolves the acceptance. The
       // fields travel FLAT next to `type` — the shape the native serde tag
-      // and the bridge decode (implementation review I3a P0).
-      await dispatchImmediate({
+      // and the bridge decode (implementation review I3a P0). Found by the
+      // host-atoms acceptance panel: the first real notify on a fresh
+      // install settled deferred and this facade asserted Immediate only.
+      const result = await dispatch<unknown>({
         type: "notify",
         ...notifyCommandOptions(options, native),
       });
+      if (result.kind === "immediate") {
+        return;
+      }
+      // Deferred acceptance: a happy terminal carries the notify result
+      // event; error terminals surface through mapTransportError in
+      // `dispatch` already (typed notification_failed etc.).
     },
     getAuthorizationStatus: async (): Promise<NotificationAuthorizationStatus> => {
       requirePlatform();

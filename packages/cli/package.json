@@ -37,6 +37,7 @@
     "example:tray-panel": "bun run examples/tray-panel.ts",
     "example:webview-control": "bun run examples/webview-control.ts",
     "example:win32-bug": "bun run examples/win32-bug.ts",
+    "example:hostAtoms": "bun run examples/host-atoms-panel.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

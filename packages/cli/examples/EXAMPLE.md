@@ -60,6 +60,22 @@ cd packages/cli/examples/app && bun install
 
 The two non-WebView examples (`basic-tray`, `first-app`) remain standalone scripts with no page.
 
+## Host-Atoms Acceptance Panel (`host-atoms-panel`)
+
+`example:hostAtoms` is the manual acceptance harness for the host-atom extensions (`@opentray/ext-clipboard`, `@opentray/ext-opener`, `@opentray/ext-notification`). It is a pure tray-menu example — no WebView page: the tray icon (label `HA`) carries a submenu per extension plus one scenario per public API surface, and the primary action runs the entire suite sequentially.
+
+What each scenario proves (read the console block; the notification/opener scenarios are additionally their own visual evidence):
+
+- **Clipboard** — UTF-16 surrogate round trip, empty-write vs clear (`""` vs `null` first-class states), the frozen 1,048,576-unit write boundary, over-cap and lone-surrogate typed rejections with their details payloads, frozen `getBackend()` snapshot (`maxWriteUtf16`, `boundedOpenRetry`).
+- **Opener** — https/file:/mailto/absolute-path acceptance (browser, default app), reveal-with-selection and the root-reveal law in Finder/Explorer, blocked-scheme (`ftp`), relative-path, and path-quote typed rejections, `allowedSchemes` snapshot.
+- **Notification** — title/body/subtitle/silent presentations (darwin native subtitle vs win32 em-dash join; subtitle-only never leaves a dangling separator), exact 64/256/64 boundary payloads, over-limit and unknown-field typed rejections, `requestAuthorization`/`getAuthorizationStatus` (darwin real prompt; win32 documented always-granted), frozen backend snapshot.
+
+Negative scenarios are designed to throw: the console prints the typed `code` + `details` payload — acceptance is reading that payload against the frozen contract. Prerequisite: the embedded `platforms/` libraries under `packages/ext-{clipboard,opener,notification}` (staged by the release pipeline, or a local `bun run scripts/binaries/build-native-job.ts --target <target> --components clipboard,opener,notification`), plus the shared broker preflight below.
+
+```bash
+pnpm --filter opentray example:hostAtoms
+```
+
 ## Preflight
 
 Run from the repo root:

@@ -169,3 +169,9 @@ Every typed rejection is an `OpenerError` with a stable `code` and structured
 
 The shared transport-close code surfaces unchanged; the frozen opener family defines
 no transport alias.
+
+## Manual Acceptance
+
+In the OpenTray source tree, `pnpm --filter opentray example:hostAtoms` runs the tray-menu
+acceptance panel covering every opener API surface and typed rejection with console
+evidence blocks (see `packages/cli/examples/EXAMPLE.md`, Host-Atoms Acceptance Panel).

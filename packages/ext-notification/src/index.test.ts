@@ -443,6 +443,22 @@ describe("@opentray/ext-notification", () => {
     });
   });
 
+  it("resolves the FIRST darwin notify through its deferred acceptance terminal (host-atoms panel regression)", async () => {
+    // The frozen design: darwin's first snapshot-less notify defers — the
+    // authorization query runs inside the 10 s budget, then the notification
+    // posts and the terminal resolves the acceptance. The acceptance panel
+    // caught the shipped facade asserting Immediate-only, so every real
+    // first notify on a fresh install rejected with 'received terminal'.
+    const transport = new ScriptedTransport([
+      () => terminalResult({ type: "result", op: "notify" }),
+      (frame) => immediateResult(frame.requestId),
+    ]);
+    const notification = attachTestNotification("darwin", transport);
+
+    await expect(notification.notify({ title: "first" })).resolves.toBeUndefined();
+    await expect(notification.notify({ title: "second" })).resolves.toBeUndefined();
+  });
+
   it("settles the authorization surface through darwin deferred terminals", async () => {
     const transport = new ScriptedTransport([
       () => terminalResult({ type: "authorization", status: "notDetermined" }),
@@ -611,11 +627,19 @@ describe("@opentray/ext-notification", () => {
     );
   });
 
-  it("requires the immediate path for notify: a deferred terminal is a wire contract violation", async () => {
-    const transport = new ScriptedTransport([() => terminalResult(null)]);
-    const notification = attachTestNotification("darwin", transport);
+  it("accepts BOTH notify settle shapes — immediate (win32 bridge / darwin with a snapshot) and the first-notify deferred acceptance (design sections 1-2)", async () => {
+    // Supersedes the earlier immediate-only assertion: the frozen law has
+    // darwin's FIRST snapshot-less notify run its authorization query inside
+    // the 10 s budget and resolve through the deferred terminal — an
+    // Immediate-only facade rejected every real first notify (caught by the
+    // host-atoms acceptance panel).
+    const deferredFirst = new ScriptedTransport([() => terminalResult(null)]);
+    const deferredFirstNotification = attachTestNotification("darwin", deferredFirst);
+    await expect(deferredFirstNotification.notify({ title: "t" })).resolves.toBeUndefined();
 
-    await expect(notification.notify({ title: "t" })).rejects.toThrow(/immediate path/);
+    const immediate = new ScriptedTransport([(frame) => immediateResult(frame.requestId)]);
+    const immediateNotification = attachTestNotification("win32", immediate);
+    await expect(immediateNotification.notify({ title: "t" })).resolves.toBeUndefined();
   });
 
   it("rejects every method on linux with a typed platform error before load", async () => {
