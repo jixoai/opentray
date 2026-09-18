@@ -689,6 +689,45 @@ mod tests {
         CString::new(envelope.to_string()).unwrap()
     }
 
+    /// Cross-layer wire pin (issue #8): dialog commands deserialize from the
+    /// EXACT flat JSON literals the facade pin asserts (fields next to
+    /// `type`), while a nested `{options: {...}}` wrapper fails to decode —
+    /// the wrapper was the shipped 0.29.0/0.30.0 wire bug that rejected
+    /// every command with 'unknown field `options`'.
+    #[test]
+    fn dialog_wire_is_flat_and_a_nested_options_wrapper_never_decodes() {
+        let flat = serde_json::from_value::<options::DialogCommand>(serde_json::json!({
+            "type": "messageDialog",
+            "message": "pin",
+            "buttons": ["OK"],
+            "defaultId": 0
+        }))
+        .expect("the facade's flat wire literal must decode");
+        match flat {
+            options::DialogCommand::MessageDialog(content) => {
+                assert_eq!(content.message, "pin");
+            }
+            other => panic!("flat literal is a messageDialog command: {other:?}"),
+        }
+        let flat_pick = serde_json::from_value::<options::DialogCommand>(serde_json::json!({
+            "type": "pickDirectory",
+            "title": "pin"
+        }))
+        .expect("the facade's flat pick literal must decode");
+        assert!(matches!(
+            flat_pick,
+            options::DialogCommand::PickDirectory(_)
+        ));
+        let nested = serde_json::from_value::<options::DialogCommand>(serde_json::json!({
+            "type": "messageDialog",
+            "options": { "message": "pin", "buttons": ["OK"], "defaultId": 0 }
+        }));
+        assert!(
+            nested.is_err(),
+            "a nested options wrapper must never decode (the issue #8 wire bug)"
+        );
+    }
+
     fn dispatch(
         instance: *mut c_void,
         envelope: &CString,

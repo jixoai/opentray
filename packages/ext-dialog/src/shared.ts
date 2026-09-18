@@ -168,13 +168,17 @@ export interface DialogBackendEvent {
   backend: DialogBackendCapabilities;
 }
 
-/** Wire command surface of the dialog extension (camelCase `ext-command` payloads). */
+/** Wire command surface of the dialog extension (camelCase `ext-command`
+ * payloads). Command fields travel FLAT next to `type` — the exact shape the
+ * native `DialogCommand` serde tag and the broker decode (issue #8: a nested
+ * `{options: {...}}` wrapper never reached a decoder and every shipped
+ * command rejected with 'unknown field `options`'). */
 export type DialogCommand =
   | { type: "getBackend" }
-  | { type: "messageDialog"; options: MessageDialogWireOptions }
-  | { type: "pickFile"; options: FilePickOptions }
-  | { type: "pickDirectory"; options: DirectoryPickOptions }
-  | { type: "pickSavePath"; options: SavePickOptions };
+  | ({ type: "messageDialog" } & MessageDialogWireOptions)
+  | ({ type: "pickFile" } & FilePickOptions)
+  | ({ type: "pickDirectory" } & DirectoryPickOptions)
+  | ({ type: "pickSavePath" } & SavePickOptions);
 
 /** Message options with the facade defaults applied (`buttons`/`defaultId` always present). */
 export type MessageDialogWireOptions = Omit<

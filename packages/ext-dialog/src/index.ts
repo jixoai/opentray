@@ -324,7 +324,7 @@ function createDialogCapability(
     }
     const result = await dispatch<unknown>({
       type: "messageDialog",
-      options: messageDialogCommandOptions(options),
+      ...messageDialogCommandOptions(options),
     });
     return unwrapTerminal(result, isMessageDialogResult, "messageDialog");
   };
@@ -345,7 +345,7 @@ function createDialogCapability(
     const multiple = options?.multiple === true;
     const result = await dispatch<unknown>({
       type: "pickFile",
-      options: filePickCommandOptions(options),
+      ...filePickCommandOptions(options),
     });
     if (multiple) {
       return canonicalizeMultiple(unwrapTerminal(result, isMultiplePickResult, "pickFile"));
@@ -375,7 +375,7 @@ function createDialogCapability(
       }
       const result = await dispatch<unknown>({
         type: "pickDirectory",
-        options: directoryPickCommandOptions(options),
+        ...directoryPickCommandOptions(options),
       });
       return canonicalizeSingle(
         unwrapTerminal(result, isSinglePickResult, "pickDirectory")
@@ -389,7 +389,7 @@ function createDialogCapability(
       }
       const result = await dispatch<unknown>({
         type: "pickSavePath",
-        options: savePickCommandOptions(options),
+        ...savePickCommandOptions(options),
       });
       return canonicalizeSingle(
         unwrapTerminal(result, isSinglePickResult, "pickSavePath")

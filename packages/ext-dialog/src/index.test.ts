@@ -162,6 +162,31 @@ describe("@opentray/ext-dialog", () => {
     expect(DialogExt.artifact).toBe(DIALOG_NATIVE_ARTIFACT);
   });
 
+  it("sends every command wire FLAT — the exact shape the native serde tag decodes (issue #8 pin)", async () => {
+    // The frame data must equal these literal objects: command fields next
+    // to `type`, NO nested `options` wrapper (the wrapper never reached the
+    // internally-tagged DialogCommand decoder and every shipped 0.29.0/0.30.0
+    // command rejected with 'unknown field `options`').
+    const transport = new ScriptedTransport([() => terminalResult({ response: 0, suppressed: false })]);
+    const dialog = attachTestDialog("darwin", transport);
+    await dialog.messageDialog({ message: "pin", buttons: ["OK"], defaultId: 0 });
+    expect((transport.frames[1] as ExtCommandFrame).data).toEqual({
+      type: "messageDialog",
+      message: "pin",
+      buttons: ["OK"],
+      defaultId: 0,
+    });
+    expect((transport.frames[1] as ExtCommandFrame).data).not.toHaveProperty("options");
+
+    const pickTransport = new ScriptedTransport([() => terminalResult(null)]);
+    const pickDialog = attachTestDialog("darwin", pickTransport);
+    await pickDialog.pickDirectory({ title: "pin" });
+    expect((pickTransport.frames[1] as ExtCommandFrame).data).toEqual({
+      type: "pickDirectory",
+      title: "pin",
+    });
+  });
+
   it("emits load-ext with expectedIdentity, then camelCase ext-commands for sugar dialogs", async () => {
     const transport = new ScriptedTransport([
       () => terminalResult({ response: 0, suppressed: false }),
@@ -191,7 +216,9 @@ describe("@opentray/ext-dialog", () => {
         ext: MOUNT_ID,
         data: {
           type: "messageDialog",
-          options: { message: "Saved", buttons: ["OK"], defaultId: 0 },
+          message: "Saved",
+          buttons: ["OK"],
+          defaultId: 0,
         },
       },
       {
@@ -202,13 +229,11 @@ describe("@opentray/ext-dialog", () => {
         ext: MOUNT_ID,
         data: {
           type: "messageDialog",
-          options: {
-            message: "Proceed?",
-            buttons: ["OK", "Cancel"],
-            defaultId: 0,
-            cancelId: 1,
-            severity: "warning",
-          },
+          message: "Proceed?",
+          buttons: ["OK", "Cancel"],
+          defaultId: 0,
+          cancelId: 1,
+          severity: "warning",
         },
       },
     ]);
@@ -234,13 +259,11 @@ describe("@opentray/ext-dialog", () => {
     expect(transport.frames[2]).toMatchObject({
       data: {
         type: "messageDialog",
-        options: {
-          message: "Allow access?",
-          buttons: ["Always", "Once", "Never"],
-          defaultId: 1,
-          cancelId: 2,
-          suppressionLabel: "Remember my choice",
-        },
+        message: "Allow access?",
+        buttons: ["Always", "Once", "Never"],
+        defaultId: 1,
+        cancelId: 2,
+        suppressionLabel: "Remember my choice",
       },
     });
   });
@@ -517,11 +540,11 @@ describe("@opentray/ext-dialog", () => {
     );
     expect(transport.frames[1]).toMatchObject({
       type: "ext-command",
-      data: { type: "pickFile", options: {} },
+      data: { type: "pickFile" },
     });
     expect(transport.frames[2]).toMatchObject({
       type: "ext-command",
-      data: { type: "pickSavePath", options: { fileNameLabel: "out" } },
+      data: { type: "pickSavePath", fileNameLabel: "out" },
     });
 
     // Combination boundary (batch C review P2): an orphan
@@ -586,7 +609,7 @@ describe("@opentray/ext-dialog", () => {
     expect(multiple).toEqual([canonicalFile, canonicalOther]);
     expect(transport.frames[3]).toMatchObject({
       type: "ext-command",
-      data: { type: "pickFile", options: { multiple: true } },
+      data: { type: "pickFile", multiple: true },
     });
 
     // @ts-expect-error — a multiple pick result is readonly string[] | null, never string
@@ -613,11 +636,9 @@ describe("@opentray/ext-dialog", () => {
       type: "ext-command",
       data: {
         type: "pickSavePath",
-        options: {
-          filters: [{ name: "Text", extensions: ["txt"] }],
-          fileNameLabel: "Save as",
-          defaultFilterIndex: 0,
-        },
+        filters: [{ name: "Text", extensions: ["txt"] }],
+        fileNameLabel: "Save as",
+        defaultFilterIndex: 0,
       },
     });
   });
@@ -638,7 +659,8 @@ describe("@opentray/ext-dialog", () => {
       ext: MOUNT_ID,
       data: {
         type: "pickDirectory",
-        options: { title: "Choose", win32: { addToRecent: false } },
+        title: "Choose",
+        win32: { addToRecent: false },
       },
     });
   });
@@ -657,7 +679,9 @@ describe("@opentray/ext-dialog", () => {
     expect(transport.frames[1]).toMatchObject({
       data: {
         type: "messageDialog",
-        options: { message: "typed only", buttons: ["OK"], defaultId: 0 },
+        message: "typed only",
+        buttons: ["OK"],
+        defaultId: 0,
       },
     });
   });
