@@ -270,6 +270,15 @@ pub unsafe extern "C" fn opentray_ext_command_v2(
             if let Err(code) = require_command_scope(&envelope) {
                 return zero_disposition_then(out_disposition, code);
             }
+            // Defense-in-depth pure preflight (mirror of the open path):
+            // the frozen rejection set and the absolute-path matrix are
+            // cross-platform laws, so the typed classification surfaces on
+            // EVERY host — the linux platform stub (and any malformed-frame
+            // path) can never mask it with platform_unsupported (CI
+            // workspace-verify linux leg).
+            if let Err(error) = resolve::prepare_reveal(&path, cfg!(target_os = "macos")) {
+                return zero_disposition_then_typed(out_disposition, EXT_ERR_REJECTED, &error);
+            }
             match platform_reveal(&path) {
                 Ok(()) => immediate_result_event(
                     envelope.scope,

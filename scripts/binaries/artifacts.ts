@@ -294,12 +294,19 @@ export const resolveStageDestinationForArtifactFile = (
   target: NativeTarget,
   fileName: string
 ): string => {
-  // Embedded extension staging (dialog, sound) is resolved per (target,
-  // kind): the library basenames are shared by darwin-arm64 and darwin-x64
-  // within their per-target artifact manifests, so the generic basename
-  // candidate list must not own these destinations (add-ext-dialog section
-  // 6.2 frozen layout, mirrored by add-ext-sound section 3).
-  for (const embeddedArtifact of [target.dialogArtifact, target.soundArtifact]) {
+  // Embedded extension staging (dialog, sound, clipboard, opener,
+  // notification) is resolved per (target, kind): the library basenames are
+  // shared by darwin-arm64 and darwin-x64 within their per-target artifact
+  // manifests, so the generic basename candidate list must not own these
+  // destinations (add-ext-dialog section 6.2 frozen layout, mirrored by
+  // add-ext-sound section 3 and the host-atoms family).
+  for (const embeddedArtifact of [
+    target.dialogArtifact,
+    target.soundArtifact,
+    target.clipboardArtifact,
+    target.openerArtifact,
+    target.notificationArtifact,
+  ]) {
     if (embeddedArtifact !== undefined && basename(embeddedArtifact) === fileName) {
       return embeddedArtifact;
     }

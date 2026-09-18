@@ -169,6 +169,7 @@ pub(crate) fn locked_error(attempts: u32, elapsed_ms: u128) -> TypedExtensionErr
 /// frozen details carry the OS error code — the win32 `GetLastError()`
 /// value; darwin bool-false surfaces pass 0 (no OS error code exists on
 /// that path).
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub(crate) fn unavailable_error(os_error_code: u32, context: &str) -> TypedExtensionError {
     TypedExtensionError {
         code: error_code::UNAVAILABLE.to_string(),
@@ -180,6 +181,7 @@ pub(crate) fn unavailable_error(os_error_code: u32, context: &str) -> TypedExten
 /// `clipboard_payload_too_large` (design section 1, frozen): the write
 /// payload exceeds 1 MiB measured in UTF-16 code units. Details carry
 /// `lengthUtf16` and `limit`.
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub(crate) fn payload_too_large_error(length_utf16: usize) -> TypedExtensionError {
     TypedExtensionError {
         code: error_code::PAYLOAD_TOO_LARGE.to_string(),
@@ -232,6 +234,7 @@ pub(crate) fn platform_unsupported_error() -> TypedExtensionError {
 
 /// UTF-16 code-unit count of `text` (the frozen measurement unit — the
 /// same unit `CF_UNICODETEXT` and JS `String.length` use).
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub(crate) fn utf16_length(text: &str) -> usize {
     text.encode_utf16().count()
 }
@@ -241,6 +244,7 @@ pub(crate) fn utf16_length(text: &str) -> usize {
 /// surrogates cannot reach this point through the JSON transport:
 /// serde_json rejects unpaired `\uXXXX` escapes at parse time and a Rust
 /// `str` cannot hold one — the facade owns the typed lone-surrogate gate.
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub(crate) fn validate_write_text(text: &str) -> Result<(), TypedExtensionError> {
     let length = utf16_length(text);
     if length > MAX_WRITE_UTF16 {
