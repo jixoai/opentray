@@ -1,6 +1,6 @@
 {
   "name": "@opentray/esbuild-plugin",
-  "version": "0.30.2",
+  "version": "0.31.0",
   "description": "esbuild adapter for the OpenTray runtime artifact packaging contract.",
   "type": "module",
   "license": "MIT",

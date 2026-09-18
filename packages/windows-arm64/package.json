@@ -1,6 +1,6 @@
 {
   "name": "@opentray/windows-arm64",
-  "version": "0.30.2",
+  "version": "0.31.0",
   "description": "OpenTray runtime artifact package for Windows ARM64.",
   "license": "MIT",
   "repository": {
