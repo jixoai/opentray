@@ -239,7 +239,8 @@ describe("@opentray/ext-notification", () => {
         ext: MOUNT_ID,
         data: {
           type: "notify",
-          options: { title: "Build finished", silent: false },
+          title: "Build finished",
+          silent: false,
         },
       },
       {
@@ -250,12 +251,10 @@ describe("@opentray/ext-notification", () => {
         ext: MOUNT_ID,
         data: {
           type: "notify",
-          options: {
-            title: "Deploy complete",
-            body: "All 3 checks passed",
-            subtitle: "CI",
-            silent: true,
-          },
+          title: "Deploy complete",
+          body: "All 3 checks passed",
+          subtitle: "CI",
+          silent: true,
         },
       },
     ]);
@@ -268,7 +267,10 @@ describe("@opentray/ext-notification", () => {
     expect(darwin.frames[1]).toMatchObject({
       data: {
         type: "notify",
-        options: { title: "t", body: "b", subtitle: "s", silent: false },
+        title: "t",
+        body: "b",
+        subtitle: "s",
+        silent: false,
       },
     });
 
@@ -283,15 +285,37 @@ describe("@opentray/ext-notification", () => {
     expect(win32.frames[1]).toMatchObject({
       data: {
         type: "notify",
-        options: { title: "t", body: "sub\u{2014}text", silent: false },
+        title: "t",
+        body: "sub\u{2014}text",
+        silent: false,
       },
     });
     expect((win32.frames[1] as ExtCommandFrame).data).not.toHaveProperty("subtitle");
     expect(win32.frames[2]).toMatchObject({
       data: {
         type: "notify",
-        options: { title: "t", body: "sub-only", silent: false },
+        title: "t",
+        body: "sub-only",
+        silent: false,
       },
+    });
+  });
+
+  it("sends the notify wire FLAT — the exact shape the native serde tag and the bridge decode (I3a P0 pin)", async () => {
+    // The frame data must equal this literal object: fields next to
+    // `type`, no nested `options` wrapper (a wrapper never reached a
+    // decoder on the native or bridge side and made every real notify
+    // fail while the mocked transports stayed green).
+    const transport = new ScriptedTransport([(frame) => immediateResult(frame.requestId)]);
+    const notification = attachTestNotification("darwin", transport);
+    await notification.notify({ title: "t", body: "b", subtitle: "s", silent: true });
+    expect(transport.frames[1]).toMatchObject({ type: "ext-command" });
+    expect((transport.frames[1] as ExtCommandFrame).data).toEqual({
+      type: "notify",
+      title: "t",
+      body: "b",
+      subtitle: "s",
+      silent: true,
     });
   });
 
@@ -354,7 +378,9 @@ describe("@opentray/ext-notification", () => {
     expect(transport.frames[1]).toMatchObject({
       data: {
         type: "notify",
-        options: { title: ASTRAL.repeat(32), body: "b".repeat(256), silent: false },
+        title: ASTRAL.repeat(32),
+        body: "b".repeat(256),
+        silent: false,
       },
     });
   });
@@ -373,11 +399,9 @@ describe("@opentray/ext-notification", () => {
     expect(win32Transport.frames[1]).toMatchObject({
       data: {
         type: "notify",
-        options: {
-          title: "t",
-          body: "s".repeat(64) + "\u{2014}" + "b".repeat(191),
-          silent: false,
-        },
+        title: "t",
+        body: "s".repeat(64) + "\u{2014}" + "b".repeat(191),
+        silent: false,
       },
     });
 
@@ -411,7 +435,10 @@ describe("@opentray/ext-notification", () => {
     expect(darwinTransport.frames[1]).toMatchObject({
       data: {
         type: "notify",
-        options: { title: "t", body: "b".repeat(192), subtitle: "s".repeat(64), silent: false },
+        title: "t",
+        body: "b".repeat(192),
+        subtitle: "s".repeat(64),
+        silent: false,
       },
     });
   });
@@ -626,6 +653,10 @@ describe("shared pure helpers", () => {
   it("joins the win32 degradation body through one em dash", () => {
     expect(joinWin32Body("s", "b")).toBe("s\u{2014}b");
     expect(joinWin32Body("s", undefined)).toBe("s");
+    // An EMPTY-string body is no body at all: never a dangling separator
+    // (implementation review I3a P1 parity with the crate's
+    // win32_joined_body).
+    expect(joinWin32Body("s", "")).toBe("s");
     // The separator itself is one UTF-16 unit and counts toward the 256 join.
     expect(joinWin32Body("s", "b").length).toBe(3);
   });

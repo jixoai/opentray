@@ -276,10 +276,12 @@ function createNotificationCapability(
       }
       // Resolve-on-acceptance: the immediate result IS the acceptance; the
       // win32 broker-internal tray-notification bridge answers with the same
-      // immediate shape (design reference section 2, O1 ruling B).
+      // immediate shape (design reference section 2, O1 ruling B). The
+      // fields travel FLAT next to `type` — the shape the native serde tag
+      // and the bridge decode (implementation review I3a P0).
       await dispatchImmediate({
         type: "notify",
-        options: notifyCommandOptions(options, native),
+        ...notifyCommandOptions(options, native),
       });
     },
     getAuthorizationStatus: async (): Promise<NotificationAuthorizationStatus> => {

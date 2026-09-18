@@ -67,10 +67,14 @@ export interface NotifyWireOptions {
   silent: boolean;
 }
 
-/** Wire command surface of the notification extension (camelCase `ext-command` payloads). */
+/** Wire command surface of the notification extension (camelCase `ext-command`
+ * payloads). `notify` carries its fields FLAT next to `type` — the exact shape
+ * the native `NotificationCommand` serde tag and the broker bridge decode
+ * (implementation review I3a P0: a nested `{options: {...}}` wrapper never
+ * reached a decoder). */
 export type NotificationCommand =
   | { type: "getBackend" }
-  | { type: "notify"; options: NotifyWireOptions }
+  | ({ type: "notify" } & NotifyWireOptions)
   | { type: "getAuthorizationStatus" }
   | { type: "requestAuthorization" };
 
@@ -223,12 +227,14 @@ const payloadInvalid = (
 
 /**
  * win32 documented degradation (design reference section 1): the subtitle
- * prefixes the body through a single em dash; a subtitle without a body is
- * the subtitle alone (no dangling separator). The joined string is what the
- * combined 256-unit limit measures.
+ * prefixes the body through a single em dash; a subtitle without a body —
+ * or with an EMPTY-string body — is the subtitle alone (never a dangling
+ * separator; implementation review I3a P1 parity with the crate's
+ * `win32_joined_body`). The joined string is what the combined 256-unit
+ * limit measures.
  */
 export const joinWin32Body = (subtitle: string, body: string | undefined): string =>
-  body === undefined ? subtitle : `${subtitle}—${body}`;
+  body === undefined || body === "" ? subtitle : `${subtitle}—${body}`;
 
 export const validateNotifyOptions = (
   options: unknown,

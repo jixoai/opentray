@@ -730,6 +730,36 @@ mod tests {
         CString::new(envelope.to_string()).unwrap()
     }
 
+    /// Cross-layer wire pin (implementation review I3a P0): the notify
+    /// command deserializes from the EXACT flat JSON literal the facade
+    /// pin asserts (`{type, title, body, subtitle, silent}` — fields next
+    /// to `type`), while a nested `{options: {...}}` wrapper fails to
+    /// decode. Both sides of the transport freeze the same bytes.
+    #[test]
+    fn notify_wire_is_flat_and_a_nested_options_wrapper_never_decodes() {
+        let flat = serde_json::from_value::<options::NotificationCommand>(
+            serde_json::json!({ "type": "notify", "title": "t", "body": "b", "subtitle": "s", "silent": true }),
+        )
+        .expect("the facade's flat wire literal must decode");
+        match flat {
+            options::NotificationCommand::Notify(content) => {
+                assert_eq!(content.title, "t");
+                assert_eq!(content.body_text(), "b");
+                assert_eq!(content.subtitle_text(), Some("s"));
+                assert!(content.is_silent());
+            }
+            other => panic!("flat literal is a notify command: {other:?}"),
+        }
+        let nested = serde_json::from_value::<options::NotificationCommand>(serde_json::json!({
+            "type": "notify",
+            "options": { "title": "t", "body": "b", "subtitle": "s", "silent": true }
+        }));
+        assert!(
+            nested.is_err(),
+            "a nested options wrapper must never decode (the P0 wire bug)"
+        );
+    }
+
     fn dispatch(
         instance: *mut c_void,
         envelope: &CString,

@@ -389,18 +389,24 @@ pub(crate) fn validate_notify_payload(
 
 /// The joined win32 body (subtitle prefix + separator + body) — the
 /// frozen projection the facade and the native defense-in-depth check
-/// must agree on.
+/// must agree on: a subtitle with no body — or with an EMPTY-string
+/// body — is the subtitle alone, never a dangling separator
+/// (implementation review I3a P1; byte-parity with the facade's
+/// `joinWin32Body`).
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn win32_joined_body(content: &NotifyContent) -> String {
-    match content.subtitle_text() {
-        Some(subtitle) => {
-            let mut joined = String::with_capacity(subtitle.len() + content.body_text().len() + 2);
+    let Some(subtitle) = content.subtitle_text() else {
+        return content.body_text().to_string();
+    };
+    match content.body.as_deref() {
+        None | Some("") => subtitle.to_string(),
+        Some(body) => {
+            let mut joined = String::with_capacity(subtitle.len() + body.len() + 2);
             joined.push_str(subtitle);
             joined.push_str(WIN32_SUBTITLE_JOIN_SEPARATOR);
-            joined.push_str(content.body_text());
+            joined.push_str(body);
             joined
         }
-        None => content.body_text().to_string(),
     }
 }
 
@@ -567,8 +573,8 @@ mod tests {
             "darwin keeps subtitle a distinct field; no joined bound exists there"
         );
 
-        // subtitle 64 + separator 2 + body 190 = 256 joined: exact fit.
-        let joined_exact = content("t", Some(&"b".repeat(190)), Some(&"s".repeat(64)));
+        // subtitle 64 + separator 1 + body 191 = 256 joined: exact fit.
+        let joined_exact = content("t", Some(&"b".repeat(191)), Some(&"s".repeat(64)));
         assert!(validate_notify_payload(&joined_exact, PayloadProjection::Win32).is_ok());
 
         // The joined projection itself is the frozen prefix form.
@@ -577,6 +583,11 @@ mod tests {
             "sub\u{2014}body"
         );
         assert_eq!(win32_joined_body(&content("t", Some("body"), None)), "body");
+        // A subtitle with no body — or with an EMPTY-string body — is the
+        // subtitle alone: never a dangling separator (implementation
+        // review I3a P1; byte-parity with the facade's joinWin32Body).
+        assert_eq!(win32_joined_body(&content("t", None, Some("sub"))), "sub");
+        assert_eq!(win32_joined_body(&content("t", Some(""), Some("sub"))), "sub");
     }
 
     /// Both platform DTO constructors serialize the complete frozen
