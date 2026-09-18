@@ -571,17 +571,39 @@ function soundMenuItems() {
       "Native name + typed miss",
     ),
     item(
-      scenario("playSound — the probe file's sibling WAV? use a system sound file", async () => {
-        // win32: C:\Windows\Media\*.wav; darwin: system sounds are not files —
-        // playSound is a win32-path capability, so this scenario documents
-        // the platform split instead of fabricating a file.
-        if (process.platform !== "win32") {
-          return "darwin: playSound is exercised on win32 (see skills reference); skipped here by design";
+      scenario("playSound — a generated WAV file (440 Hz sine, 150 ms; darwin NSSound / win32 RIFF path)", async () => {
+        // Synthesize a real, minimal 16-bit PCM mono 8 kHz WAV at runtime —
+        // no fixture file, valid on both platforms (win32 runs its exact
+        // RIFF structural validation against it).
+        const sampleRate = 8000;
+        const durationSeconds = 0.15;
+        const sampleCount = Math.floor(sampleRate * durationSeconds);
+        const dataSize = sampleCount * 2;
+        const buffer = Buffer.alloc(44 + dataSize);
+        buffer.write("RIFF", 0, "ascii");
+        buffer.writeUInt32LE(36 + dataSize, 4);
+        buffer.write("WAVE", 8, "ascii");
+        buffer.write("fmt ", 12, "ascii");
+        buffer.writeUInt32LE(16, 16);
+        buffer.writeUInt16LE(1, 20); // PCM
+        buffer.writeUInt16LE(1, 22); // mono
+        buffer.writeUInt32LE(sampleRate, 24);
+        buffer.writeUInt32LE(sampleRate * 2, 28); // byte rate
+        buffer.writeUInt16LE(2, 32); // block align
+        buffer.writeUInt16LE(16, 34); // bits per sample
+        buffer.write("data", 36, "ascii");
+        buffer.writeUInt32LE(dataSize, 40);
+        for (let index = 0; index < sampleCount; index += 1) {
+          const amplitude = 0.5 * 32767 * Math.sin((2 * Math.PI * 440 * index) / sampleRate);
+          buffer.writeInt16LE(Math.round(amplitude), 44 + index * 2);
         }
-        await sound.playSound("C:\\Windows\\Media\\Windows Notify.wav");
-        return "wav played";
+        const wavPath = join(tmpdir(), "opentray-host-atoms-probe.wav");
+        writeFileSync(wavPath, buffer);
+        await sound.playSound(wavPath);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return `${buffer.length} bytes at ${wavPath} — a 440 Hz tone should have just played (audibility is the check)`;
       }),
-      "Play WAV file",
+      "Play generated WAV",
     ),
     item(
       scenario("getBackend() frozen snapshot", async () => {
