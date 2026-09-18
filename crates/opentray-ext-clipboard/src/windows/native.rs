@@ -6,18 +6,18 @@
 //! `WinClipboard`/`RetryClock` seams; every flow law (retry discipline,
 //! HGLOBAL ownership, single-command close) lives in `super` and is
 //! exercised by the host spy tests. `GetClipboardData(CF_UNICODETEXT)`
-//! NULL discrimination and the ERROR_ACCESS_DENIED retry gate read
-//! `GetLastError()` exactly where the frozen design places them.
+//! NULL discrimination is gated by `IsClipboardFormatAvailable` (the
+//! authoritative no-text oracle) and the ERROR_ACCESS_DENIED retry gate
+//! reads `GetLastError()` exactly where the frozen design places them.
 
 use std::ffi::c_void;
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::HGLOBAL;
-use windows_sys::Win32::Foundation::{
-    GetLastError, GlobalFree, ERROR_ACCESS_DENIED, ERROR_SUCCESS,
-};
+use windows_sys::Win32::Foundation::{GetLastError, GlobalFree, ERROR_ACCESS_DENIED};
 use windows_sys::Win32::System::DataExchange::{
-    CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+    CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    SetClipboardData,
 };
 use windows_sys::Win32::System::Memory::{
     GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
@@ -115,18 +115,23 @@ impl WinClipboard for Win32Clipboard {
     }
 
     fn get_data(&mut self) -> GetDataOutcome {
-        // SAFETY: plain handle query of the task's open clipboard; the
-        // returned handle stays board-owned (lock-copy-unlock only).
+        // SAFETY: availability query + plain handle query of the task's open
+        // clipboard; the returned handle stays board-owned
+        // (lock-copy-unlock only).
+        // Real-machine amendment (2026-09-18): an emptied board makes
+        // `GetClipboardData` return NULL with `GetLastError() == 1168`
+        // (ERROR_NOT_FOUND) — the last error after a NULL result is NOT a
+        // contract. `IsClipboardFormatAvailable` is the authoritative
+        // no-text oracle; a NULL handle WITH the format available is the
+        // only genuine failure path.
+        if unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT as u32) } == 0 {
+            return GetDataOutcome::NullNoData;
+        }
         let handle = unsafe { GetClipboardData(CF_UNICODETEXT as u32) };
         if !handle.is_null() {
             GetDataOutcome::Handle(GlobalMem::new(handle as usize))
         } else {
-            match unsafe { GetLastError() } {
-                // Frozen NULL discrimination (design section 1): success
-                // last error = no text on the board (null, not an error).
-                ERROR_SUCCESS => GetDataOutcome::NullNoData,
-                code => GetDataOutcome::NullFailed(code),
-            }
+            GetDataOutcome::NullFailed(unsafe { GetLastError() })
         }
     }
 

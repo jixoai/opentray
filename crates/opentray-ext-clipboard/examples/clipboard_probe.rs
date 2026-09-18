@@ -12,6 +12,7 @@
 //!
 //! Run:
 //!   cargo run -p opentray-ext-clipboard --example clipboard_probe
+//!   cargo run -p opentray-ext-clipboard --example clipboard_probe read
 //!   cargo run -p opentray-ext-clipboard --example clipboard_probe clear
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -106,6 +107,10 @@ fn main() {
             serde_json::Value::Null,
             "cleared board reads as the first-class null state"
         );
+    } else if mode == "read" {
+        // Cross-process read: reports whatever a PREVIOUS process left on
+        // the board (no writes in this run).
+        dispatch("cross-process readText", serde_json::json!({ "type": "readText" }));
     } else {
         // Surrogate pair in the payload: the real UTF-16 board round trip.
         dispatch(

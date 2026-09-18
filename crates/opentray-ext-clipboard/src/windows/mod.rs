@@ -86,8 +86,11 @@ pub(crate) enum OpenOutcome {
 }
 
 /// `GetClipboardData(CF_UNICODETEXT)` outcome: a board-owned handle, NULL
-/// with `ERROR_SUCCESS` (no text on the board), or NULL with another last
-/// error (design section 1 NULL discrimination).
+/// with no text on the board (the native surface decides through
+/// `IsClipboardFormatAvailable` — the last error after a NULL result is
+/// not a contract), or NULL as a genuine failure with the format
+/// available (design section 1 NULL discrimination, real-machine
+/// amendment 2026-09-18).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum GetDataOutcome {
     Handle(GlobalMem),
@@ -207,10 +210,10 @@ pub(crate) fn flow_write_text<T: WinClipboard, C: RetryClock>(
 }
 
 /// Read flow (design section 2): bounded open -> GetClipboardData ->
-/// lock-copy-unlock -> CloseClipboard -> decode. NULL+ERROR_SUCCESS reads
-/// as `None` (the first-class empty state); the board-owned handle is
-/// never freed and never touched after close; the deep copy is the only
-/// retained memory.
+/// lock-copy-unlock -> CloseClipboard -> decode. The native no-text
+/// outcome reads as `None` (the first-class empty state); the
+/// board-owned handle is never freed and never touched after close; the
+/// deep copy is the only retained memory.
 pub(crate) fn flow_read_text<T: WinClipboard, C: RetryClock>(
     api: &mut T,
     clock: &C,

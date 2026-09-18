@@ -38,7 +38,7 @@
 
 ### Requirement: writeText payloads SHALL follow the frozen UTF-16 encoding and bound contract
 
-Payload measurement SHALL count UTF-16 code units (the JS/TS string unit, the same unit win32 `CF_UNICODETEXT` uses). `writeText` SHALL enforce a frozen capacity of 1 MiB = 1,048,576 UTF-16 code units in the facade preflight; exceeding it SHALL reject with typed `clipboard_payload_too_large` (details: `lengthUtf16`, `limit`). `readText` SHALL impose no cap on returned content — the local clipboard is trusted input, deep-copied and returned. An input containing a lone surrogate (an unpaired high or low surrogate, e.g. `"\uD83D"`) SHALL reject with typed `clipboard_payload_invalid` (details: `reason: "lone-surrogate"`, `index`) — never a silent replacement write, which would break read-back round-trip fidelity. On win32 a `GetClipboardData(CF_UNICODETEXT)` result of `NULL` with `GetLastError() == ERROR_SUCCESS` (no clipboard-owner data) SHALL read as `null` (no text), while `NULL` with any other last error (e.g. `ERROR_INVALID_HANDLE`) SHALL reject with typed `clipboard_unavailable` whose details carry the OS error code; darwin `string(forType:)` returning `nil` SHALL read as `null` with no ambiguous path.
+Payload measurement SHALL count UTF-16 code units (the JS/TS string unit, the same unit win32 `CF_UNICODETEXT` uses). `writeText` SHALL enforce a frozen capacity of 1 MiB = 1,048,576 UTF-16 code units in the facade preflight; exceeding it SHALL reject with typed `clipboard_payload_too_large` (details: `lengthUtf16`, `limit`). `readText` SHALL impose no cap on returned content — the local clipboard is trusted input, deep-copied and returned. An input containing a lone surrogate (an unpaired high or low surrogate, e.g. `"\uD83D"`) SHALL reject with typed `clipboard_payload_invalid` (details: `reason: "lone-surrogate"`, `index`) — never a silent replacement write, which would break read-back round-trip fidelity. On win32 `IsClipboardFormatAvailable(CF_UNICODETEXT)` SHALL be the sole authority for "no text on the board": a FALSE result SHALL read as `null` without consulting the last error, and a `GetClipboardData(CF_UNICODETEXT)` result of `NULL` with the format available SHALL reject with typed `clipboard_unavailable` whose details carry the OS error code. The last error after a NULL `GetClipboardData` is not a contract (real-machine amendment 2026-09-18: an emptied board reports `ERROR_NOT_FOUND`, not `ERROR_SUCCESS`); darwin `string(forType:)` returning `nil` SHALL read as `null` with no ambiguous path.
 
 #### Scenario: The 1 MiB UTF-16 write cap is a typed rejection
 
@@ -52,15 +52,15 @@ Payload measurement SHALL count UTF-16 code units (the JS/TS string unit, the sa
 - **WHEN** `writeText('\uD83D')` is called with an unpaired surrogate
 - **THEN** the call SHALL reject with typed `clipboard_payload_invalid` with `reason: "lone-surrogate"` and the offending index, and no replacement-character write SHALL occur
 
-#### Scenario: win32 NULL with the success last error reads as null
+#### Scenario: win32 format-unavailable reads as null regardless of the last error
 
-- **GIVEN** the facade running on win32 with `GetClipboardData(CF_UNICODETEXT)` returning `NULL` and `GetLastError() == ERROR_SUCCESS`
+- **GIVEN** the facade running on win32 with the clipboard open and `IsClipboardFormatAvailable(CF_UNICODETEXT)` returning FALSE (e.g. an emptied board whose last error is `ERROR_NOT_FOUND`/`ERROR_SUCCESS`/stale)
 - **WHEN** `readText()` is awaited
-- **THEN** the promise SHALL resolve `null` (no text), not an error
+- **THEN** the promise SHALL resolve `null` (no text), not an error, and `GetClipboardData` SHALL not be consulted
 
-#### Scenario: win32 NULL with a different last error is typed-unavailable
+#### Scenario: win32 NULL with the format available is typed-unavailable
 
-- **GIVEN** the facade running on win32 with `GetClipboardData(CF_UNICODETEXT)` returning `NULL` and `GetLastError()` reporting e.g. `ERROR_INVALID_HANDLE`
+- **GIVEN** the facade running on win32 with `IsClipboardFormatAvailable(CF_UNICODETEXT)` returning TRUE and `GetClipboardData(CF_UNICODETEXT)` returning `NULL` (the last error reporting e.g. `ERROR_INVALID_HANDLE`)
 - **WHEN** `readText()` is awaited
 - **THEN** the call SHALL reject with typed `clipboard_unavailable` whose details carry the OS error code
 

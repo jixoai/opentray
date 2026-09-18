@@ -39,11 +39,16 @@ darwin clearContents 与 setString("") 是两个操作；不合并）。
   WTF-8/替换策略拒绝——**冻结：typed `clipboard_payload_invalid`**（details: reason:"lone-surrogate",
   index），不做替换静默写入（替换会破坏读回往返一致性）。readText 遇到原生侧未终止 UTF-16
   （理论上不可能——CF_UNICODETEXT 契约要求零终止；防御性截断至终止位并按实际字节返回，不报错）。
-- **NULL 语义区分（win32 冻结）**：`GetClipboardData(CF_UNICODETEXT) == NULL` 且
-  `GetLastError() == ERROR_SUCCESS/无ClipboardOwner 数据` → 剪贴板无文本 → 返回 **null**；
-  NULL 且 `GetLastError()` 为其他错误（如 ERROR_INVALID_HANDLE）→ typed
-  `clipboard_unavailable`（details 含 OS 错误码）。darwin：`string(forType:)` 返回 nil → null
-  （无歧义路径）。
+- **NULL 语义区分（win32；真机修订 2026-09-18）**：原冻结条款以
+  `GetLastError() == ERROR_SUCCESS` 判「无文本」——真机证伪：`EmptyClipboard` 后
+  `GetClipboardData(CF_UNICODETEXT)` 返回 NULL 且 `GetLastError() == 1168`
+  (ERROR_NOT_FOUND)，按原条款会 typed `clipboard_unavailable`，把一等空态变成错误
+  （clipboard_probe clear 复现，两轮确定性）。修订冻结：**`IsClipboardFormatAvailable(CF_UNICODETEXT)`
+  是「无文本」的唯一权威 oracle**（FALSE → null，不调用 GetClipboardData、不读 last
+  error）；格式可用而 `GetClipboardData` 返回 NULL 才是 typed
+  `clipboard_unavailable`（details 含 OS 错误码）。`GetLastError()` 在 NULL 返回后
+  不是契约（微软文档未定义，实测空板可报 1168/残留值）。darwin：`string(forType:)`
+  返回 nil → null（无歧义路径）。
 
 ## 2. 平台投影
 
