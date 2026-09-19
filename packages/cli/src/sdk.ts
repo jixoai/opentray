@@ -19,6 +19,10 @@ import {
 } from "./client";
 import { connectLocalBroker, BROKER_CONNECTION_CLOSED_MESSAGE } from "./local-broker";
 import {
+  createTransportSupervisor,
+  type TransportRecoveryOptions,
+} from "./transport-supervision";
+import {
   normalizeCreateTrayMenu,
   type CreateTrayMenu,
   type CreateTrayMenuClickHandler,
@@ -39,6 +43,15 @@ export interface OpenTrayRuntimeOptions {
   /** Stable app-entry launch vector. Omitted/null snapshots the current invocation. */
   appLaunch?: OpenTrayAppLaunchOptions | null;
   autoStart?: boolean;
+  /**
+   * Optional transport supervision policy (Tier 0/2,
+   * harden-transport-robustness). Every key has a working default; omitting
+   * the object entirely means full default protection: heartbeat death
+   * detection, automatic in-process recovery with journal replay, and a
+   * bounded restart budget. `enabled: false` keeps death detection but
+   * degrades to today's fail-fast behavior.
+   */
+  recovery?: TransportRecoveryOptions;
 }
 
 /** App-facing tray options accepted by top-level createTray. */
@@ -73,13 +86,24 @@ export const createTray = async (
       : normalizeAppIcon(runtimeOptions.appIcon);
   const normalized = normalizeCreateTrayOptions(options);
   const appLaunch = normalizeAppLaunch(runtimeOptions.appLaunch);
-  const connection = await connectLocalBroker({
-    ...runtimeOptions,
-    ...(appIcon === undefined ? {} : { appIcon }),
-    appLaunch,
+  const { recovery, ...brokerOptions } = runtimeOptions;
+  // The supervisor owns the broker connection from here on: it presents the
+  // stable transport surface to createClient/handles while holding one
+  // LocalBrokerConnection per generation underneath. A respawn is exactly a
+  // reconnect through the original options — daemon lifecycle, identity
+  // gates, and lock reclaim all reapply unchanged.
+  const supervisor = createTransportSupervisor({
+    connect: () =>
+      connectLocalBroker({
+        ...brokerOptions,
+        ...(appIcon === undefined ? {} : { appIcon }),
+        appLaunch,
+      }),
+    ...(recovery === undefined ? {} : { recovery }),
   });
   try {
-    const tray = await createClient(connection, {
+    await supervisor.connect();
+    const tray = await createClient(supervisor, {
       appOptions: {
         ...(runtimeOptions.appName === undefined
           ? {}
@@ -88,12 +112,12 @@ export const createTray = async (
       },
     }).createTray(normalized.options);
     return wrapCreateTrayHandle(tray, {
-      closeConnection: () => connection.close(),
+      shutdown: () => supervisor.shutdown(),
       destroyPromise: undefined,
       menuUnsubscribe: bindMenuClickHandlers(tray, normalized.menuHandlers),
     });
   } catch (error) {
-    await connection.close().catch(noop);
+    await supervisor.shutdown().catch(noop);
     throw error;
   }
 };
@@ -149,6 +173,10 @@ const wrapCreateTrayHandle = (
         // with the transport-close sentinel is the requested end state, not
         // a failure — a generated app's Quit must exit cleanly when the
         // broker exits first (P3.6 quit-path finding, 2026-09-12).
+        // The destroy frame carries the teardown budget class (W3), which
+        // the supervisor reads as the caller-initiated marker — so this
+        // close race can never be misread as uninvited death and never
+        // triggers recovery.
         const isTransportClosed = (error: unknown): boolean =>
           error instanceof Error &&
           error.message === BROKER_CONNECTION_CLOSED_MESSAGE;
@@ -160,7 +188,7 @@ const wrapCreateTrayHandle = (
           }
         } finally {
           try {
-            await state.closeConnection();
+            await state.shutdown();
           } catch (error) {
             if (!isTransportClosed(error)) {
               throw error;
@@ -196,7 +224,8 @@ interface NormalizedCreateTrayOptions {
 }
 
 interface CreateTrayHandleState {
-  closeConnection: () => Promise<void>;
+  /** Graceful supervised teardown: marks caller-initiated and closes the generation. */
+  shutdown: () => Promise<void>;
   destroyPromise: Promise<void> | undefined;
   menuUnsubscribe: () => void;
 }

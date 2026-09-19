@@ -10,6 +10,7 @@ import type {
   OpenTrayRuntimeOptions,
   ServerFrame,
   TransportRequestOptions,
+  TransportState,
 } from "./index";
 
 interface TestOpenTrayConnection extends OpenTrayConnection {
@@ -437,6 +438,24 @@ describe("opentray ergonomic createTray", () => {
         },
       })
     ).rejects.toThrow("duplicate menu item id: 1");
+  });
+
+  it("exposes the supervised transport surface and keeps destroy recovery-free (W6 Tier 1)", async () => {
+    const tray = await createTray({ id: "status" });
+    const states: TransportState[] = [];
+
+    expect(typeof tray.onTransportStateChange).toBe("function");
+    expect(typeof tray.registerTransportRebuild).toBe("function");
+    const unsubscribe = tray.onTransportStateChange?.((state) => states.push(state));
+
+    await tray.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    // Caller-initiated teardown emits no supervision transitions and closes
+    // the supervised generation exactly once.
+    expect(states).toEqual([]);
+    expect(transport.closeCount).toBe(1);
+    unsubscribe?.();
   });
 });
 

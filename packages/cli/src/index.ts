@@ -17,7 +17,9 @@ export {
   type OpenTrayClient,
   type OpenTrayEventSource,
   type OpenTrayTransport,
+  type TransportRebuildContext,
   type TransportRequestOptions,
+  type TransportState,
   type TrayEventByType,
   type TrayEventType,
   type TrayExtension,
@@ -52,6 +54,20 @@ export {
   type CreateTrayOptions,
   type OpenTrayRuntimeOptions,
 } from "./sdk";
+export {
+  /**
+   * Supervised transport layer (W2/W4/W5/W6, harden-transport-robustness):
+   * heartbeat death detection, declarative journal replay, bounded in-process
+   * recovery, and the Tier 0/1/2 hooks. `createTray` wires it by default;
+   * the factory is public for callers that own their own connection setup.
+   */
+  createTransportSupervisor,
+  /** Typed fail-fast rejection after the terminal `abandoned` supervision state. */
+  TransportAbandonedError,
+  type CreateTransportSupervisorOptions,
+  type SupervisedLocalBrokerConnection,
+  type TransportRecoveryOptions,
+} from "./transport-supervision";
 export {
   /**
    * Transport-close sentinel every request rejects with once the broker

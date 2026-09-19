@@ -16,6 +16,7 @@ import type {
 } from "@opentray/spec";
 import type {
   NativeExtensionArtifact,
+  TransportRebuildContext,
   TrayExtension,
   TrayExtensionContext,
   TrayHandle,
@@ -841,6 +842,9 @@ export const WebviewExt = {
           ...(context.sessionId === undefined ? {} : { sessionId: context.sessionId }),
           permissions: options?.permissions ?? {},
           ...(appReopen === undefined ? {} : { appReopen }),
+          ...(isTransportRebuildRegistrar(tray)
+            ? { registerTransportRebuild: tray.registerTransportRebuild }
+            : {}),
         });
       },
       createWebviewHandle() {
@@ -906,6 +910,18 @@ const isConnectionDeadEventSourceTray = (
   tray: TrayHandle
 ): tray is ConnectionDeadEventSourceTray =>
   "onConnectionDead" in tray && typeof tray.onConnectionDead === "function";
+
+type TransportRebuildRegistrarTray = TrayHandle & {
+  registerTransportRebuild(
+    rebuild: (context: TransportRebuildContext) => Promise<void>
+  ): void;
+};
+
+const isTransportRebuildRegistrar = (
+  tray: TrayHandle
+): tray is TransportRebuildRegistrarTray =>
+  "registerTransportRebuild" in tray &&
+  typeof tray.registerTransportRebuild === "function";
 
 const createWebviewEndpoint = (
   tray: TrayHandle,
@@ -1031,6 +1047,15 @@ interface WebviewWindowRuntimeContext {
   sessionId?: string;
   permissions: WebviewPermissionRuntimeOptions;
   appReopen?: AppReopenCoordinator;
+  /**
+   * Supervised-transport rebuild registration (harden-transport-robustness
+   * W4): present when the hosting tray rides a supervised connection. The
+   * window facade registers one callback that recreates the native window
+   * session after broker recovery and re-emits a full state snapshot.
+   */
+  registerTransportRebuild?(
+    rebuild: (context: TransportRebuildContext) => Promise<void>
+  ): void;
 }
 
 const createWebviewWindowHandle = (
@@ -1052,11 +1077,18 @@ const createWebviewWindowHandle = (
     layout: declaredLayout,
     ...wireOptions
   } = options;
+  // Session attribution follows the live broker generation
+  // (harden-transport-robustness W4): a supervised recovery swaps the session,
+  // and every orchestration/channel owner tuple must carry the fresh id, so
+  // the port's owner tuple reads it dynamically.
+  let liveSessionId = runtime.sessionId ?? "";
   const orchestrationPort: WebviewOrchestrationPort = {
     owner: {
       appId: runtime.appId,
       trayId: runtime.trayId,
-      sessionId: runtime.sessionId ?? "",
+      get sessionId() {
+        return liveSessionId;
+      },
     },
     async request(data) {
       const envelopes = await endpoint.requestEnvelopes(data);
@@ -1070,8 +1102,33 @@ const createWebviewWindowHandle = (
     onDead: (handler) => endpoint.onConnectionDead(handler),
   };
   const orchestrationWindowId = options.windowId ?? DEFAULT_WEBVIEW_WINDOW_ID;
-  const orchestration = createWebviewOrchestration(orchestrationPort, orchestrationWindowId);
+  // Mutable by rebuild: the orchestration object is terminal after a
+  // transport death (D3), so recovery recreates it rather than resurrecting
+  // dead bookkeeping.
+  let orchestration = createWebviewOrchestration(
+    orchestrationPort,
+    orchestrationWindowId
+  );
   let bootstrapped = false;
+  // Cumulative last-set style (initial options + successful patches): the
+  // declarative style truth a rebuild re-applies after re-showing.
+  let lastStylePatch: WebviewWindowStylePatch | undefined = wireOptions.style;
+  const mergeStylePatch = (
+    base: WebviewWindowStylePatch | undefined,
+    patch: WebviewWindowStylePatch
+  ): WebviewWindowStylePatch => ({ ...(base ?? {}), ...patch });
+  // Local listener registry: the same surface push events deliver through
+  // (`listen`), fed additionally by facade-synthesized snapshot events after
+  // a rebuild — the resync guarantee for the recovery lost-events window.
+  const localListeners = new Map<
+    string,
+    Set<(event: WebviewWindowEvent<unknown>) => void>
+  >();
+  const emitSynthesized = (event: string, payload: unknown): void => {
+    for (const handler of localListeners.get(event) ?? []) {
+      handler({ event, id: 0, payload });
+    }
+  };
   const listenerCounts = new Map<string, number>();
   let permissionPoll: ReturnType<typeof setInterval> | undefined;
   const appReopenRegistration = runtime.appReopen?.register({
@@ -1206,6 +1263,123 @@ const createWebviewWindowHandle = (
     };
   };
 
+  /**
+   * Show implementation with a session-identity override: the public
+   * `show(command)` always uses the runtime-captured session; a supervised
+   * rebuild replays the full bootstrap against the fresh generation's
+   * session id instead.
+   */
+  const applyShow = async (
+    command: Partial<WebviewWindowOptions> = {},
+    sessionIdOverride?: string
+  ): Promise<void> => {
+    const wasBootstrapped = bootstrapped;
+    const {
+      webviews: commandWebviews,
+      layout: commandLayout,
+      ...commandOverride
+    } = command;
+    const bootstrapChildren = !wasBootstrapped
+      ? (commandWebviews ?? declaredWebviews ?? [])
+      : [];
+    const orchestrating = bootstrapChildren.length > 0;
+    if (
+      orchestrating &&
+      (commandOverride.html !== undefined ||
+        commandOverride.url !== undefined ||
+        wireOptions.html !== undefined ||
+        wireOptions.url !== undefined)
+    ) {
+      throw new Error(
+        "webviews[] and html/url are exclusive: an orchestrated window declares its content per child webview"
+      );
+    }
+    const showSessionId = sessionIdOverride ?? runtime.sessionId;
+    if (sessionIdOverride !== undefined) {
+      liveSessionId = sessionIdOverride;
+    }
+    const showCommand = {
+      type: "show",
+      ...(bootstrapped ? {} : wireOptions),
+      ...commandOverride,
+      ...(showSessionId === undefined ? {} : { sessionId: showSessionId }),
+      ...(orchestrating
+        ? { windowOnly: true, windowId: orchestrationWindowId }
+        : {}),
+    } satisfies WebviewCommand;
+    await endpoint.command<void>(showCommand);
+    bootstrapped = true;
+    appReopenRegistration?.setBootstrapped(true);
+    if (!wasBootstrapped) {
+      const initialStyle = command.style ?? options.style;
+      appReopenRegistration?.setAppMode(initialStyle?.appMode ?? false);
+      // Listeners registered before the native session existed could not
+      // subscribe; the first successful show heals their declarations.
+      resubscribeWindowEvents();
+    } else if (command.style !== undefined) {
+      appReopenRegistration?.setAppMode(command.style.appMode ?? false);
+    }
+    if (command.style !== undefined) {
+      lastStylePatch = mergeStylePatch(lastStylePatch, command.style);
+    }
+    appReopenRegistration?.markActive();
+    startAppReopenActivityTracking();
+    if (!wasBootstrapped && orchestrating) {
+      // 3.3 friction #2 formalized: the orchestrated window bootstrap is
+      // show{windowOnly:true} followed by create-webview per child, then
+      // the optional first layout commit — one facade sugar, wire-frozen
+      // in fixtures/frames/facade-bridge-frames.json.
+      for (const child of bootstrapChildren) {
+        await orchestration.createWebview(child);
+      }
+      const bootstrapLayout = commandLayout ?? declaredLayout;
+      if (bootstrapLayout !== undefined) {
+        await orchestration.setLayout(bootstrapLayout);
+      }
+    }
+  };
+
+  runtime.registerTransportRebuild?.(async (context) => {
+    if (!bootstrapped) {
+      // Never shown, or destroyed before the transport died: there is no
+      // declarative window session to rebuild.
+      return;
+    }
+    // The previous orchestration object is terminal (its transport death
+    // already fired); recreate it so replayed children/layout/channel
+    // bookkeeping routes through fresh state.
+    orchestration.dispose();
+    orchestration = createWebviewOrchestration(
+      orchestrationPort,
+      orchestrationWindowId
+    );
+    bootstrapped = false;
+    // Replay the retained bootstrap (wire options, declared children,
+    // declared layout) against the fresh session — the WebView page reload
+    // from its URL is contract, not implementation detail.
+    await applyShow({}, context.sessionId);
+    // Re-apply the cumulative last-set style (initial options + successful
+    // patches), then resubscribe (the first-show heal inside applyShow
+    // already re-declared listener interest on the new native session).
+    if (lastStylePatch !== undefined) {
+      await endpoint.command<WebviewWindowStyle>({
+        type: "setStyle",
+        style: lastStylePatch,
+      } satisfies WebviewCommand);
+    }
+    // Full-state snapshot resync: query the queryable native families and
+    // re-emit them through the same listener surface push events use.
+    // Focus has no query verb on the frozen v1 command surface, so it stays
+    // an edge-only event family.
+    const [visible, bounds] = await Promise.all([
+      endpoint.command<boolean>({ type: "isVisible" } satisfies WebviewCommand),
+      endpoint.command<Rect>({ type: "getBounds" } satisfies WebviewCommand),
+    ]);
+    emitSynthesized("visibleChange", { visible });
+    emitSynthesized("moved", { x: bounds.x, y: bounds.y });
+    emitSynthesized("resized", { width: bounds.width, height: bounds.height });
+  });
+
   return {
     devtools: {
       open() {
@@ -1225,66 +1399,8 @@ const createWebviewWindowHandle = (
       },
     },
     windowId: orchestrationWindowId,
-    async show(command = {}) {
-      const wasBootstrapped = bootstrapped;
-      const {
-        webviews: commandWebviews,
-        layout: commandLayout,
-        ...commandOverride
-      } = command;
-      const bootstrapChildren = !wasBootstrapped
-        ? (commandWebviews ?? declaredWebviews ?? [])
-        : [];
-      const orchestrating = bootstrapChildren.length > 0;
-      if (
-        orchestrating &&
-        (commandOverride.html !== undefined ||
-          commandOverride.url !== undefined ||
-          wireOptions.html !== undefined ||
-          wireOptions.url !== undefined)
-      ) {
-        throw new Error(
-          "webviews[] and html/url are exclusive: an orchestrated window declares its content per child webview"
-        );
-      }
-      const showCommand = {
-        type: "show",
-        ...(bootstrapped ? {} : wireOptions),
-        ...commandOverride,
-        ...(runtime.sessionId === undefined
-          ? {}
-          : { sessionId: runtime.sessionId }),
-        ...(orchestrating
-          ? { windowOnly: true, windowId: orchestrationWindowId }
-          : {}),
-      } satisfies WebviewCommand;
-      await endpoint.command<void>(showCommand);
-      bootstrapped = true;
-      appReopenRegistration?.setBootstrapped(true);
-      if (!wasBootstrapped) {
-        const initialStyle = command.style ?? options.style;
-        appReopenRegistration?.setAppMode(initialStyle?.appMode ?? false);
-        // Listeners registered before the native session existed could not
-        // subscribe; the first successful show heals their declarations.
-        resubscribeWindowEvents();
-      } else if (command.style !== undefined) {
-        appReopenRegistration?.setAppMode(command.style.appMode ?? false);
-      }
-      appReopenRegistration?.markActive();
-      startAppReopenActivityTracking();
-      if (!wasBootstrapped && orchestrating) {
-        // 3.3 friction #2 formalized: the orchestrated window bootstrap is
-        // show{windowOnly:true} followed by create-webview per child, then
-        // the optional first layout commit — one facade sugar, wire-frozen
-        // in fixtures/frames/facade-bridge-frames.json.
-        for (const child of bootstrapChildren) {
-          await orchestration.createWebview(child);
-        }
-        const bootstrapLayout = commandLayout ?? declaredLayout;
-        if (bootstrapLayout !== undefined) {
-          await orchestration.setLayout(bootstrapLayout);
-        }
-      }
+    show(command = {}) {
+      return applyShow(command);
     },
     async setTitle(title: string) {
       if (typeof title !== "string" || title.length === 0) {
@@ -1414,19 +1530,22 @@ const createWebviewWindowHandle = (
           style,
         } satisfies WebviewCommand)
         .then((result) => {
+          lastStylePatch = mergeStylePatch(lastStylePatch, style);
           appReopenRegistration?.setAppMode(result.appMode);
           return result;
         });
     },
     setBackground(background, backgroundOptions) {
+      const patch: WebviewWindowStylePatch = {
+        background: backgroundInputWithOptions(background, backgroundOptions),
+      };
       return endpoint
         .command<WebviewWindowStyle>({
           type: "setStyle",
-          style: {
-            background: backgroundInputWithOptions(background, backgroundOptions),
-          },
+          style: patch,
         } satisfies WebviewCommand)
         .then((result) => {
+          lastStylePatch = mergeStylePatch(lastStylePatch, patch);
           appReopenRegistration?.setAppMode(result.appMode);
           return result;
         });
@@ -1435,7 +1554,26 @@ const createWebviewWindowHandle = (
       event: string,
       handler: (event: WebviewWindowEvent<TPayload>) => void
     ): () => void {
-      return trackWindowListener(event, endpoint.listen(event, handler));
+      // Mirror the registration into the local registry so facade-synthesized
+      // snapshot events reach the same consumers push events do.
+      const listeners =
+        localListeners.get(event) ?? new Set<(event: WebviewWindowEvent<unknown>) => void>();
+      localListeners.set(event, listeners);
+      // Contained variance cast: synthesized dispatch only delivers payloads
+      // this facade produced for exactly this event name, so the handler's
+      // narrower payload type is honored by construction.
+      const record = handler as unknown as (
+        event: WebviewWindowEvent<unknown>
+      ) => void;
+      listeners.add(record);
+      const stop = trackWindowListener(event, endpoint.listen(event, handler));
+      return () => {
+        listeners.delete(record);
+        if (listeners.size === 0) {
+          localListeners.delete(event);
+        }
+        stop();
+      };
     },
     setContent(command) {
       return endpoint.command<void>(command);

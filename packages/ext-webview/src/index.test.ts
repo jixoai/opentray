@@ -10,6 +10,7 @@ import {
   type OpenTrayConnection,
   type OpenTrayEventFrame,
   type OpenTrayTransport,
+  type TransportRebuildContext,
   type TrayHandle,
 } from "opentray";
 
@@ -2390,6 +2391,112 @@ describe("@opentray/ext-webview", () => {
     expect(webviewBrowserPermissionFamilies).toContain("camera");
     expect(webviewBrowserPermissionFamilies).toContain("windowManagement");
   });
+
+  it("registers a transport rebuild that recreates the window, style, and a state snapshot (W4)", async () => {
+    const rebuilds: Array<(context: TransportRebuildContext) => Promise<void>> = [];
+    const transport = new WebviewResultTransport((command) => {
+      if (!isWebviewCommand(command)) return { type: "unknown" };
+      if (command.type === "isVisible") return true;
+      if (command.type === "getBounds") {
+        return { x: 4, y: 5, width: 300, height: 200 };
+      }
+      return { type: "ok" };
+    });
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+    Object.assign(tray, {
+      registerTransportRebuild(
+        rebuild: (context: TransportRebuildContext) => Promise<void>,
+      ): void {
+        rebuilds.push(rebuild);
+      },
+    });
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({
+        html: "<main />",
+        width: 300,
+        height: 200,
+        style: { frameless: true },
+      });
+    await webviewWindow.show();
+    await webviewWindow.setStyle({ keepOnTop: true });
+    expect(rebuilds).toHaveLength(1);
+    transport.frames.length = 0;
+    const seen: string[] = [];
+    webviewWindow.listen("visibleChange", (event) => {
+      seen.push(`visibleChange:${String((event.payload as { visible: boolean }).visible)}`);
+    });
+    webviewWindow.listen("moved", (event) => {
+      const { x, y } = event.payload as { x: number; y: number };
+      seen.push(`moved:${x}:${y}`);
+    });
+    webviewWindow.listen("resized", (event) => {
+      const { width, height } = event.payload as { width: number; height: number };
+      seen.push(`resized:${width}x${height}`);
+    });
+
+    // The supervised transport recovered: the rebuild replays the retained
+    // bootstrap against the fresh session id, re-applies the cumulative
+    // style, and re-emits a full state snapshot through the listener surface.
+    const rebuild = rebuilds[0];
+    if (rebuild === undefined) {
+      throw new Error("expected a registered rebuild callback");
+    }
+    await rebuild({ generation: 1, sessionId: "session-2" });
+
+    expect(extCommandTypes(transport)).toEqual([
+      "subscribeWindowEvents",
+      "show",
+      "subscribeWindowEvents",
+      "setStyle",
+      "isVisible",
+      "getBounds",
+    ]);
+    const showFrame = extCommandData(transport, "show");
+    expect(showFrame).toMatchObject({
+      sessionId: "session-2",
+      html: "<main />",
+      width: 300,
+      height: 200,
+      style: { frameless: true },
+    });
+    expect(extCommandData(transport, "setStyle")).toMatchObject({
+      style: { frameless: true, keepOnTop: true },
+    });
+    expect(seen).toEqual(["visibleChange:true", "moved:4:5", "resized:300x200"]);
+  });
+
+  it("skips the transport rebuild for a window destroyed before the transport died (W4)", async () => {
+    const rebuilds: Array<(context: TransportRebuildContext) => Promise<void>> = [];
+    const transport = new WebviewResultTransport((command) => {
+      if (!isWebviewCommand(command)) return { type: "unknown" };
+      if (command.type === "isVisible") return false;
+      if (command.type === "getBounds") return { x: 0, y: 0, width: 1, height: 1 };
+      return { type: "ok" };
+    });
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+    Object.assign(tray, {
+      registerTransportRebuild(
+        rebuild: (context: TransportRebuildContext) => Promise<void>,
+      ): void {
+        rebuilds.push(rebuild);
+      },
+    });
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({ html: "<main />" });
+    await webviewWindow.show();
+    await webviewWindow.destroy();
+    transport.frames.length = 0;
+
+    const rebuild = rebuilds[0];
+    if (rebuild === undefined) {
+      throw new Error("expected a registered rebuild callback");
+    }
+    await rebuild({ generation: 1, sessionId: "session-2" });
+
+    expect(transport.frames.filter((frame) => frame.type === "ext-command")).toHaveLength(0);
+  });
 });
 
 class RecordingTransport implements OpenTrayTransport {
@@ -2475,6 +2582,30 @@ class FailingLoadTransport extends RecordingTransport {
 
 const isWebviewCommand = (value: unknown): value is WebviewCommand =>
   typeof value === "object" && value !== null && "type" in value;
+
+/** `data.type` sequence of every ext-command frame, in order. */
+const extCommandTypes = (transport: RecordingTransport): string[] =>
+  transport.frames
+    .filter((frame): frame is Extract<ClientRequestFrame, { type: "ext-command" }> =>
+      frame.type === "ext-command",
+    )
+    .map((frame) => (frame.data as { type: string }).type);
+
+/** The most recent ext-command payload carrying the given `data.type`. */
+const extCommandData = (
+  transport: RecordingTransport,
+  type: string,
+): Record<string, unknown> | undefined => {
+  for (let index = transport.frames.length - 1; index >= 0; index -= 1) {
+    const frame = transport.frames[index];
+    if (frame?.type !== "ext-command") continue;
+    const data = frame.data as Record<string, unknown>;
+    if (data.type === type) {
+      return data;
+    }
+  }
+  return undefined;
+};
 
 const flushMicrotasks = async (): Promise<void> => {
   await Promise.resolve();

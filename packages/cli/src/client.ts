@@ -84,6 +84,27 @@ export type OpenTrayEventFrame = Extract<
   { type: "event" | "app-event" | "ext-event" }
 >;
 
+/**
+ * Supervision state vocabulary (W6 Tier 1, harden-transport-robustness):
+ * `healthy` (a live generation is serving), `recovering` (uninvited death was
+ * declared and in-process recovery is running), `abandoned` (terminal — the
+ * recovery budget is exhausted and every later call fails fast with the
+ * typed `TransportAbandonedError`). Edge-triggered through
+ * `onTransportStateChange`; the initial `healthy` state never fires.
+ */
+export type TransportState = "healthy" | "recovering" | "abandoned";
+
+/**
+ * Context handed to a facade rebuild callback after a supervised recovery
+ * (W4): the fresh generation number and the new generation's broker session
+ * id, so extension facades can re-create session-attributed native state
+ * against the live session instead of the dead one.
+ */
+export interface TransportRebuildContext {
+  readonly generation: number;
+  readonly sessionId: string | undefined;
+}
+
 export interface OpenTrayEventSource {
   onEvent(listener: (frame: OpenTrayEventFrame) => void): () => void;
 }
@@ -205,6 +226,24 @@ export interface EventfulTrayHandle extends TrayHandle {
    * stopped, and every later request rejects instead of hanging.
    */
   onConnectionDead?(handler: (error: Error) => void): () => void;
+  /**
+   * Tier 1 transport-supervision state projection (W6,
+   * harden-transport-robustness). Present when the underlying transport is
+   * supervised (the `createTray` runtime path always supervises): fires
+   * edge-triggered `healthy | recovering | abandoned` transitions across
+   * connection generations; the current value is not replayed.
+   */
+  onTransportStateChange?(handler: (state: TransportState) => void): () => void;
+  /**
+   * Facade rebuild registration (W4, harden-transport-robustness). Present
+   * on supervised transports: extension facades register one callback that
+   * re-creates their declarative native state (windows, styles,
+   * subscriptions) after the supervisor recovered a fresh generation.
+   * Callbacks run in registration order after the core journal replay.
+   */
+  registerTransportRebuild?(
+    rebuild: (context: TransportRebuildContext) => Promise<void>
+  ): void;
 }
 
 export interface ExtensionLoadOptions {
@@ -518,9 +557,22 @@ const attachEventfulTrayHandle = (
     ? (handler: (error: Error) => void) => source.onConnectionDead(handler)
     : undefined;
 
+  // W6/W4: surface the supervision state projection and the facade rebuild
+  // registration when the transport is supervised (the createTray runtime
+  // path always is). Same structural-capability pattern as onConnectionDead.
+  const transportSupervision = isTransportSupervisionSource(source)
+    ? {
+        onTransportStateChange: (handler: (state: TransportState) => void) =>
+          source.onTransportStateChange(handler),
+        registerTransportRebuild: (rebuild: (context: TransportRebuildContext) => Promise<void>) =>
+          source.registerTransportRebuild(rebuild),
+      }
+    : undefined;
+
   const eventful: EventfulTrayHandle = {
     ...handle,
     ...(onConnectionDead === undefined ? {} : { onConnectionDead }),
+    ...(transportSupervision === undefined ? {} : transportSupervision),
     listenExtension<TData = unknown>(
       ext: string,
       handler: (event: ExtensionEnvelope<TData>) => void
@@ -600,6 +652,22 @@ const isConnectionDeadSource = (
 ): transport is OpenTrayEventSource & ConnectionDeadSourceTransport =>
   "onConnectionDead" in transport &&
   typeof transport.onConnectionDead === "function";
+
+/** Structural view of supervised transports (W4/W6 supervision seams). */
+interface TransportSupervisionSourceTransport {
+  onTransportStateChange(handler: (state: TransportState) => void): () => void;
+  registerTransportRebuild(
+    rebuild: (context: TransportRebuildContext) => Promise<void>
+  ): void;
+}
+
+const isTransportSupervisionSource = (
+  transport: OpenTrayEventSource
+): transport is OpenTrayEventSource & TransportSupervisionSourceTransport =>
+  "onTransportStateChange" in transport &&
+  typeof transport.onTransportStateChange === "function" &&
+  "registerTransportRebuild" in transport &&
+  typeof transport.registerTransportRebuild === "function";
 
 const resolveDefaultAppRef = async (
   transport: OpenTrayTransport,
