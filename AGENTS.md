@@ -724,3 +724,48 @@ applies unchanged and is not repeated here.
   standing attack surface); trims exactly one trailing separator only when the result
   is still a legal absolute path; roots (`/`, `C:\`, `\\server\share\`, `\\?\` roots)
   are never trimmed and reveal by opening the root itself.
+
+## Transport Robustness Law
+
+Established by `harden-transport-robustness` (issue #11, the pnpm-pub
+2026-09-15 silent-wedge handoff; 2026-09-20).
+
+- No public SDK call may hang forever. Every transport round-trip is
+  deadline-bounded (interactive 5 s / teardown 2 s / bootstrap 10 s defaults,
+  overridable per call) and settles with the typed `TransportTimeoutError`;
+  a reply arriving after its deadline is a stateless drop. Deferred extension
+  operations are two-phase: the deadline bounds dispatch-to-acceptance; an
+  accepted (user-paced, e.g. held-modal) operation settles only through its
+  terminal frame or the typed transport-close rejection — never a transport
+  deadline.
+- Uninvited transport death is a recoverable event; caller-initiated teardown
+  never recovers. The teardown budget class doubling as the caller-intent
+  marker is frozen contract: `destroy()` racing its own close must never be
+  misread as uninvited death.
+- Supervision swaps broker-connection generations and never resurrects a dead
+  connection; per-connection death semantics stay per-generation truth.
+  Recovery is exactly: cooldown backoff, reconnect through the caller's
+  original identity-gated connect options (daemon lifecycle, artifact
+  identity, and lock reclaim reapply — never a second spawn path),
+  declarative journal replay (frame-sniffed, zero API change; resolved
+  trayIds injected so handle identity survives; last-write-wins mutations;
+  successful destroy evicts), registered facade rebuilds in registration
+  order, then a full-state snapshot re-emit over the queryable families.
+  WebView page reload from URL on recovery is contract. The recovery budget
+  (3 per 10 min, in-memory per runtime) bounds the loop; exhaustion is the
+  terminal `abandoned` state with typed `transport_abandoned` fail-fast calls
+  and headless app survival — "flicker or explicitly dead, never silence".
+- Broker socket writes never run on the native owner loop: outbound frames
+  ride a bounded per-session FIFO drained by a dedicated writer on every
+  platform. A write failure or a full queue escalates that session through
+  the disconnect path (observable in broker diagnostics, one-shot deduped,
+  never swallowed, never parking the producer); escalation also shuts the
+  socket so a parked writer thread exits. Listener shutdown is bounded end
+  to end (poll-ticked accept, bounded join with detach), and endpoint file
+  removal is `(dev,ino)`-guarded so a replacement broker's endpoint is never
+  destroyed. The Exit ack gets one bounded final-flush window on process
+  exit.
+- The kill -9 recovery drill and the deterministic budget-exhaustion leg are
+  permanently green gates in the client test suite; the kill leg runs
+  wherever a broker binary of this checkout is resolvable and skips loudly
+  (with build instructions) otherwise.
