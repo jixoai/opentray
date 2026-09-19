@@ -1,5 +1,9 @@
 export {
+  BOOTSTRAP_CALL_DEADLINE_MS,
   BrokerServerError,
+  INTERACTIVE_CALL_DEADLINE_MS,
+  TEARDOWN_CALL_DEADLINE_MS,
+  TransportTimeoutError,
   createClient,
   createInitFrame,
   createTrayHandle,
@@ -13,6 +17,7 @@ export {
   type OpenTrayClient,
   type OpenTrayEventSource,
   type OpenTrayTransport,
+  type TransportRequestOptions,
   type TrayEventByType,
   type TrayEventType,
   type TrayExtension,

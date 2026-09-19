@@ -9,6 +9,7 @@ import type {
   OpenTrayEventFrame,
   OpenTrayRuntimeOptions,
   ServerFrame,
+  TransportRequestOptions,
 } from "./index";
 
 interface TestOpenTrayConnection extends OpenTrayConnection {
@@ -40,7 +41,13 @@ vi.mock("./local-broker", () => ({
   BROKER_CONNECTION_CLOSED_MESSAGE: "broker connection closed",
 }));
 
-import { createTray, BROKER_CONNECTION_CLOSED_MESSAGE, PROTOCOL_VERSION } from "./index";
+import {
+  createTray,
+  BROKER_CONNECTION_CLOSED_MESSAGE,
+  PROTOCOL_VERSION,
+  TEARDOWN_CALL_DEADLINE_MS,
+  TransportTimeoutError,
+} from "./index";
 
 const crossPlatformAppIcon = (): AppIcon => [
   {
@@ -254,6 +261,34 @@ describe("opentray ergonomic createTray", () => {
     expect(transport.closeCount).toBe(1);
   });
 
+  it("settles a wedged destroy within the teardown budget class and still closes the session (W3)", async () => {
+    // Wedged broker shape: the native destroy round-trip never answers, so
+    // only the transport-level teardown deadline can keep the consumer's
+    // destroy() bounded — the mechanism this change puts in the transport
+    // instead of an application-layer race (pnpm-pub compensation deleted).
+    const tray = await createTray({ id: "status" });
+    transport.wedgeNextDestroy = true;
+
+    const startedAt = Date.now();
+    const error = await tray.destroy().then(
+      () => {
+        throw new Error("expected a rejection");
+      },
+      (rejection: unknown) => rejection
+    );
+
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(error).toBeInstanceOf(TransportTimeoutError);
+    // The destroy frame carried the teardown budget class: deadlineMs is the
+    // caller-initiated-teardown channel later phases read to suppress recovery.
+    expect(transport.destroyRequestOptions).toEqual([
+      { deadlineMs: TEARDOWN_CALL_DEADLINE_MS },
+    ]);
+    // The sentinel-swallowing contract (P3.6) is unchanged: the timeout is not
+    // the sentinel, so it surfaces while the finally-close still ran once.
+    expect(transport.closeCount).toBe(1);
+  });
+
   it("closes the caller-owned broker session when tray creation fails", async () => {
     transport.failNextCreateTray = true;
 
@@ -407,6 +442,8 @@ describe("opentray ergonomic createTray", () => {
 
 class EventfulRecordingTransport implements TestOpenTrayConnection {
   readonly frames: ClientRequestFrame[] = [];
+  /** Options received alongside each destroy-tray frame (teardown budget class). */
+  readonly destroyRequestOptions: Array<TransportRequestOptions | undefined> = [];
   closeCount = 0;
   failNextCreateTray = false;
   failNextSetMenu = false;
@@ -414,6 +451,13 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
   failNextDestroyWithConnectionClosed = false;
   /** Next destroy-tray rejects with a typed (non-sentinel) failure. */
   failNextDestroyTyped = false;
+  /**
+   * Next destroy-tray never answers; the fake honors the passed deadline the
+   * way the real transport does (scaled down to keep this wrap-path test
+   * fast — the mechanism itself is covered against the real connection in
+   * local-broker.test.ts).
+   */
+  wedgeNextDestroy = false;
   /** Next close() rejects with the transport-close sentinel. */
   failNextCloseWithConnectionClosed = false;
   /** Simulates a dead broker connection: every request rejects immediately. */
@@ -423,7 +467,10 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
   appIconVariant: string | undefined;
   private readonly listeners = new Set<(frame: OpenTrayEventFrame) => void>();
 
-  async request(frame: ClientRequestFrame): Promise<ServerFrame> {
+  async request(
+    frame: ClientRequestFrame,
+    options?: TransportRequestOptions
+  ): Promise<ServerFrame> {
     this.frames.push(frame);
     if (this.connectionDead) {
       throw new Error(BROKER_CONNECTION_CLOSED_MESSAGE);
@@ -486,6 +533,7 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
         }
         return { type: "ack", requestId: frame.requestId };
       case "destroy-tray":
+        this.destroyRequestOptions.push(options);
         if (this.failNextDestroyWithConnectionClosed) {
           this.failNextDestroyWithConnectionClosed = false;
           throw new Error("broker connection closed");
@@ -493,6 +541,16 @@ class EventfulRecordingTransport implements TestOpenTrayConnection {
         if (this.failNextDestroyTyped) {
           this.failNextDestroyTyped = false;
           throw new Error("failed_destroy_tray");
+        }
+        if (this.wedgeNextDestroy) {
+          this.wedgeNextDestroy = false;
+          const deadlineMs = Math.min(options?.deadlineMs ?? 5_000, 50);
+          return new Promise<never>((_, reject) => {
+            setTimeout(
+              () => reject(new TransportTimeoutError(frame.requestId, deadlineMs)),
+              deadlineMs
+            );
+          });
         }
         return { type: "ack", requestId: frame.requestId };
       case "set-tray-icon":

@@ -9,7 +9,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   PROTOCOL_VERSION,
@@ -23,9 +23,18 @@ import {
   BrokerProtocolVersionError,
   EXTENSION_TRANSPORT_CLOSED_CODE,
   ExtensionOperationError,
+  LocalBrokerConnection,
   connectLocalBroker,
+  type BrokerSocket,
+  type TransportDeadlineExpiry,
 } from "./local-broker";
-import { BrokerServerError } from "./client";
+import {
+  BOOTSTRAP_CALL_DEADLINE_MS,
+  BrokerServerError,
+  TEARDOWN_CALL_DEADLINE_MS,
+  TransportTimeoutError,
+  createTrayHandle,
+} from "./client";
 import { resolveCallerLabel } from "./daemon/caller-label";
 import type { DaemonDriver } from "./daemon/lifecycle";
 import type { DaemonPaths } from "./daemon/paths";
@@ -788,11 +797,556 @@ describe("local broker client deferred operations (pending-until-final)", () => 
   });
 });
 
+describe("local broker client per-call deadlines and bounded teardown (W1/W3)", () => {
+  const writeFrame = (socket: Socket, frame: ServerFrame): void => {
+    socket.write(`${JSON.stringify(frame)}\n`);
+  };
+
+  const boundsFrame = (
+    frame: Extract<ClientFrame, { type: "get-tray-bounds" }>
+  ): ServerFrame => ({
+    type: "tray-bounds",
+    requestId: frame.requestId,
+    appId: frame.appId,
+    trayId: frame.trayId,
+    bounds: {
+      kind: "native",
+      source: "backend.nativeTrayBounds",
+      rect: { x: 3, y: 4, width: 24, height: 24 },
+    },
+  });
+
+  it("rejects a never-answered interactive request in budget, without declaring death (W1)", async () => {
+    const homeDir = await makeTempHome();
+    // Half-open shape: the broker answers ordinary traffic but the wedged
+    // requestId is never answered.
+    const driver = createSocketBrokerDriver((frame, socket) => {
+      if (frame.type === "get-tray-bounds" && frame.requestId === "bounds-wedge") {
+        return;
+      }
+      if (frame.type === "get-tray-bounds") {
+        writeFrame(socket, boundsFrame(frame));
+      }
+    });
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    });
+    const terminalErrors: Error[] = [];
+    connection.onConnectionDead((error) => terminalErrors.push(error));
+    const expiries: TransportDeadlineExpiry[] = [];
+    connection.onDeadlineExpiry((expiry) => expiries.push(expiry));
+
+    const error = await connection
+      .request(
+        {
+          type: "get-tray-bounds",
+          requestId: "bounds-wedge",
+          appId: "app-1",
+          trayId: "tray-1",
+        },
+        { deadlineMs: 60 },
+      )
+      .then(
+        () => {
+          throw new Error("expected a rejection");
+        },
+        (rejection: unknown) => rejection
+      );
+
+    expect(error).toBeInstanceOf(TransportTimeoutError);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(BrokerServerError);
+    expect(error).not.toBeInstanceOf(ExtensionOperationError);
+    const typed = error as TransportTimeoutError;
+    expect(typed.requestId).toBe("bounds-wedge");
+    expect(typed.deadlineMs).toBe(60);
+
+    // A timeout settles one call; it is never a death verdict (W1 law: the
+    // expiry only feeds the later heartbeat's failure classification).
+    expect(connection.connectionDead).toBe(false);
+    expect(terminalErrors).toHaveLength(0);
+    expect(expiries).toEqual([{ requestId: "bounds-wedge", deadlineMs: 60 }]);
+
+    const after = await connection.request({
+      type: "get-tray-bounds",
+      requestId: "bounds-after-wedge",
+      appId: "app-1",
+      trayId: "tray-1",
+    });
+    expect(after).toMatchObject({
+      type: "tray-bounds",
+      requestId: "bounds-after-wedge",
+    });
+    await connection.close();
+  });
+
+  it("discards a late reply after its deadline without settling anything or throwing (W1)", async () => {
+    const homeDir = await makeTempHome();
+    let serverSocket: Socket | undefined;
+    const driver = createSocketBrokerDriver((frame, socket) => {
+      serverSocket = socket;
+      if (frame.type === "get-tray-bounds" && frame.requestId === "bounds-late") {
+        return;
+      }
+      if (frame.type === "get-tray-bounds") {
+        writeFrame(socket, boundsFrame(frame));
+      }
+    });
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    });
+
+    const error = await connection
+      .request(
+        {
+          type: "get-tray-bounds",
+          requestId: "bounds-late",
+          appId: "app-1",
+          trayId: "tray-1",
+        },
+        { deadlineMs: 40 },
+      )
+      .then(
+        () => {
+          throw new Error("expected a rejection");
+        },
+        (rejection: unknown) => rejection
+      );
+    expect(error).toBeInstanceOf(TransportTimeoutError);
+
+    if (serverSocket === undefined) {
+      throw new Error("server socket was not captured");
+    }
+    // The reply arrives after its budget: the pending entry is gone, so the
+    // transport drops it statelessly — no second settlement, no throw.
+    writeFrame(serverSocket, {
+      type: "tray-bounds",
+      requestId: "bounds-late",
+      appId: "app-1",
+      trayId: "tray-1",
+      bounds: {
+        kind: "native",
+        source: "backend.nativeTrayBounds",
+        rect: { x: 9, y: 9, width: 24, height: 24 },
+      },
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 25);
+    });
+
+    expect(connection.connectionDead).toBe(false);
+    const after = await connection.request({
+      type: "get-tray-bounds",
+      requestId: "bounds-after-late",
+      appId: "app-1",
+      trayId: "tray-1",
+    });
+    expect(after).toMatchObject({ type: "tray-bounds", requestId: "bounds-after-late" });
+    await connection.close();
+  });
+
+  it("keeps healthy round-trips free of timeout observables (W1 happy path)", async () => {
+    const homeDir = await makeTempHome();
+    const driver = createSocketBrokerDriver((frame, socket) => {
+      if (frame.type === "get-tray-bounds") {
+        writeFrame(socket, boundsFrame(frame));
+      }
+    });
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    });
+    const expiries: TransportDeadlineExpiry[] = [];
+    connection.onDeadlineExpiry((expiry) => expiries.push(expiry));
+
+    const responses = await Promise.all(
+      ["bounds-happy-1", "bounds-happy-2", "bounds-happy-3"].map((requestId) =>
+        connection.request({
+          type: "get-tray-bounds",
+          requestId,
+          appId: "app-1",
+          trayId: "tray-1",
+        }),
+      ),
+    );
+    expect(
+      responses.map((frame) =>
+        frame.type === "tray-bounds" ? frame.requestId : `unexpected-${frame.type}`
+      )
+    ).toEqual(["bounds-happy-1", "bounds-happy-2", "bounds-happy-3"]);
+    expect(expiries).toEqual([]);
+    expect(connection.connectionDead).toBe(false);
+    await connection.close();
+  });
+
+  it("keeps an accepted deferred operation past its dispatch deadline and settles once on its terminal (W1 two-phase law)", async () => {
+    const homeDir = await makeTempHome();
+    const operationId = "000000000000003c";
+    let serverSocket: Socket | undefined;
+    const driver = createSocketBrokerDriver((frame, socket) => {
+      serverSocket = socket;
+      if (frame.type === "ext-command") {
+        writeFrame(socket, {
+          type: "ext-command-accepted",
+          requestId: frame.requestId,
+          operationId,
+        });
+        return;
+      }
+      if (frame.type === "get-tray-bounds") {
+        writeFrame(socket, boundsFrame(frame));
+      }
+    });
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    });
+    const expiries: TransportDeadlineExpiry[] = [];
+    connection.onDeadlineExpiry((expiry) => expiries.push(expiry));
+
+    const deferred = connection.request(
+      {
+        type: "ext-command",
+        requestId: "ext-deferred-held",
+        appId: "app-1",
+        trayId: "tray-1",
+        ext: "dialog",
+        data: { type: "show" },
+      },
+      // The dispatch budget expires well before the user-paced terminal: a
+      // held modal dialog must never be settled by a transport deadline.
+      { deadlineMs: 50 },
+    );
+    let settled = false;
+    void deferred.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await new Promise((resolve) => {
+      setTimeout(resolve, 90);
+    });
+    expect(settled).toBe(false);
+    expect(expiries).toEqual([]);
+
+    if (serverSocket === undefined) {
+      throw new Error("server socket was not captured");
+    }
+    writeFrame(serverSocket, {
+      type: "ext-operation-terminal",
+      operationId,
+      payload: { kind: "result", value: { userClosed: true } },
+    });
+    const terminal = await deferred;
+    expect(terminal).toMatchObject({
+      type: "ext-operation-terminal",
+      operationId,
+    });
+    expect(connection.connectionDead).toBe(false);
+    await connection.close();
+  });
+
+  it("times out an unaccepted deferred dispatch with the timeout class and drops its late acceptance (W1)", async () => {
+    const homeDir = await makeTempHome();
+    const operationId = "000000000000003d";
+    let serverSocket: Socket | undefined;
+    const driver = createSocketBrokerDriver((frame, socket) => {
+      serverSocket = socket;
+      // The wedge shape: no acceptance is ever sent for the ext-command —
+      // this is the dispatch phase the deadline owns.
+      if (frame.type === "get-tray-bounds") {
+        writeFrame(socket, boundsFrame(frame));
+      }
+    });
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    });
+    const expiries: TransportDeadlineExpiry[] = [];
+    connection.onDeadlineExpiry((expiry) => expiries.push(expiry));
+
+    const error = await connection
+      .request(
+        {
+          type: "ext-command",
+          requestId: "ext-deferred-wedge",
+          appId: "app-1",
+          trayId: "tray-1",
+          ext: "dialog",
+          data: { type: "show" },
+        },
+        { deadlineMs: 50 },
+      )
+      .then(
+        () => {
+          throw new Error("expected a rejection");
+        },
+        (rejection: unknown) => rejection
+      );
+
+    // The timeout is the third class: it is neither the frozen
+    // extension_transport_closed transport-death mapping (add-ext-dialog 5.1)
+    // nor a broker wire error.
+    expect(error).toBeInstanceOf(TransportTimeoutError);
+    expect(error).not.toBeInstanceOf(ExtensionOperationError);
+    expect((error as TransportTimeoutError).requestId).toBe("ext-deferred-wedge");
+    expect(expiries).toEqual([
+      { requestId: "ext-deferred-wedge", deadlineMs: 50 },
+    ]);
+
+    if (serverSocket === undefined) {
+      throw new Error("server socket was not captured");
+    }
+    // Late acceptance and terminal for the expired dispatch both find no
+    // owner and settle nothing.
+    writeFrame(serverSocket, {
+      type: "ext-command-accepted",
+      requestId: "ext-deferred-wedge",
+      operationId,
+    });
+    writeFrame(serverSocket, {
+      type: "ext-operation-terminal",
+      operationId,
+      payload: { kind: "result", value: { late: true } },
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 25);
+    });
+
+    expect(connection.connectionDead).toBe(false);
+    const after = await connection.request({
+      type: "get-tray-bounds",
+      requestId: "bounds-after-deferred-wedge",
+      appId: "app-1",
+      trayId: "tray-1",
+    });
+    expect(after).toMatchObject({
+      type: "tray-bounds",
+      requestId: "bounds-after-deferred-wedge",
+    });
+    await connection.close();
+  });
+
+  it("settles a wedged handle destroy within the teardown budget while still issuing the native destroy (W3)", async () => {
+    const homeDir = await makeTempHome();
+    let destroySeen = false;
+    const driver = createSocketBrokerDriver((frame, socket) => {
+      if (frame.type === "destroy-tray") {
+        destroySeen = true;
+        return;
+      }
+      if (frame.type === "get-tray-bounds") {
+        writeFrame(socket, boundsFrame(frame));
+      }
+    });
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      daemonDriver: driver,
+    });
+    const terminalErrors: Error[] = [];
+    connection.onConnectionDead((error) => terminalErrors.push(error));
+
+    const handle = createTrayHandle(connection, "app-1", "tray-1");
+    const startedAt = Date.now();
+    const error = await handle.destroy().then(
+      () => {
+        throw new Error("expected a rejection");
+      },
+      (rejection: unknown) => rejection
+    );
+
+    // The teardown-class transport deadline bounds the wedged round-trip
+    // (scenario shape from the pnpm-pub incident compensation): the promise
+    // settles inside the budget and the native destroy frame was still sent.
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(error).toBeInstanceOf(TransportTimeoutError);
+    expect((error as TransportTimeoutError).deadlineMs).toBe(TEARDOWN_CALL_DEADLINE_MS);
+    expect(destroySeen).toBe(true);
+    // Caller-initiated teardown never declares death and never feeds recovery:
+    // the expiry settled one call, the connection stays open until close().
+    expect(connection.connectionDead).toBe(false);
+    expect(terminalErrors).toHaveLength(0);
+    await connection.close();
+  });
+
+  it("rejects init within the bootstrap budget when the broker never answers (W1)", async () => {
+    vi.useFakeTimers();
+    try {
+      const socket = new FakeBrokerSocket();
+      const connection = new LocalBrokerConnection(socket, "fake-endpoint", "test-label");
+      const expiries: TransportDeadlineExpiry[] = [];
+      connection.onDeadlineExpiry((expiry) => expiries.push(expiry));
+
+      const rejection = connection
+        .init("test-client", PROTOCOL_VERSION, brokerIdentity("a"))
+        .then(
+          () => {
+            throw new Error("expected a rejection");
+          },
+          (error: unknown) => error
+        );
+      await vi.advanceTimersByTimeAsync(BOOTSTRAP_CALL_DEADLINE_MS);
+      const error = await rejection;
+
+      expect(error).toBeInstanceOf(TransportTimeoutError);
+      const typed = error as TransportTimeoutError;
+      expect(typed.requestId).toBe("init");
+      expect(typed.deadlineMs).toBe(BOOTSTRAP_CALL_DEADLINE_MS);
+      expect(connection.connectionDead).toBe(false);
+      expect(expiries).toEqual([
+        { requestId: "init", deadlineMs: BOOTSTRAP_CALL_DEADLINE_MS },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("degrades close() to socket destroy when the graceful end wedges (W3)", async () => {
+    vi.useFakeTimers();
+    try {
+      const socket = new FakeBrokerSocket();
+      const connection = new LocalBrokerConnection(socket, "fake-endpoint", "test-label");
+      const artifactIdentity = brokerIdentity("a");
+      const initPromise = connection.init("test-client", PROTOCOL_VERSION, artifactIdentity);
+      socket.receive(
+        `${JSON.stringify({
+          type: "ready",
+          protocolVersion: PROTOCOL_VERSION,
+          brokerVersion: "0.1.0",
+          brokerArtifactIdentity: artifactIdentity,
+          sessionId: "session-fake",
+        })}\n`,
+      );
+      await initPromise;
+      expect(connection.sessionId).toBe("session-fake");
+
+      // The wedged socket accepts end() but never completes it; close() must
+      // still resolve — degrading to destroy, never rejecting with a timeout.
+      const settled = connection.close().then(() => "resolved" as const);
+      await vi.advanceTimersByTimeAsync(TEARDOWN_CALL_DEADLINE_MS);
+      expect(await settled).toBe("resolved");
+      expect(socket.destroyed).toBe(true);
+      expect(socket.written.some((line) => line.includes('"exit"'))).toBe(true);
+      // The forced destroy reports through the existing death path, keeping
+      // the terminal surface coherent after degraded teardown.
+      expect(connection.connectionDead).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 const makeTempHome = async (): Promise<string> => {
   const dir = await mkdtemp("/tmp/ot-lb-");
   tempDirs.push(dir);
   return dir;
 };
+
+/**
+ * Deterministic in-memory BrokerSocket for the deadline paths whose real
+ * budget constants (bootstrap 10 s, teardown 2 s) would make live-socket
+ * tests needlessly slow: a never-answering broker for init, and a wedged
+ * graceful end for close() degradation. Everything is driven by
+ * `receive`/`destroy` and vitest fake timers; no real I/O exists.
+ */
+class FakeBrokerSocket implements BrokerSocket {
+  readonly written: string[] = [];
+  ended = false;
+  destroyed = false;
+  private readonly dataListeners = new Set<(chunk: Buffer | string) => void>();
+  private readonly errorListeners = new Set<(error: Error) => void>();
+  private readonly closeListeners = new Set<() => void>();
+  private endCallback: (() => void) | undefined;
+
+  setEncoding(_encoding: BufferEncoding): void {}
+
+  on(event: "data", listener: (chunk: Buffer | string) => void): void;
+  on(event: "error", listener: (error: Error) => void): void;
+  on(event: "close", listener: () => void): void;
+  on(event: string, listener: (...args: never[]) => void): void {
+    if (event === "data") {
+      this.dataListeners.add(listener as (chunk: Buffer | string) => void);
+      return;
+    }
+    if (event === "error") {
+      this.errorListeners.add(listener as (error: Error) => void);
+      return;
+    }
+    this.closeListeners.add(listener as () => void);
+  }
+
+  once(event: "connect", listener: () => void): void;
+  once(event: "error", listener: (error: Error) => void): void;
+  once(event: string, listener: (...args: never[]) => void): void {
+    if (event === "connect") {
+      (listener as () => void)();
+      return;
+    }
+    this.errorListeners.add(listener as (error: Error) => void);
+  }
+
+  off(event: "error", listener: (error: Error) => void): void {
+    this.errorListeners.delete(listener);
+  }
+
+  write(data: string): void {
+    this.written.push(data);
+  }
+
+  end(callback: () => void): void {
+    // Wedged by design: the half-close is accepted but its completion is
+    // never delivered until destroy() runs.
+    this.ended = true;
+    this.endCallback = callback;
+  }
+
+  destroy(): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.destroyed = true;
+    this.endCallback = undefined;
+    for (const listener of [...this.closeListeners]) {
+      listener();
+    }
+  }
+
+  /** Delivers one received line exactly as the real socket's "data" event would. */
+  receive(line: string): void {
+    for (const listener of [...this.dataListeners]) {
+      listener(line);
+    }
+  }
+}
 
 const prepareBundle = async (bundlePath: string, appId?: string): Promise<void> => {
   const resources = join(bundlePath, "Contents/Resources");

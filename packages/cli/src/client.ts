@@ -28,8 +28,55 @@ import {
   type NativeExtensionArtifact,
 } from "./native-extension-artifact";
 
+/**
+ * Optional per-call transport budget (W1, harden-transport-robustness): a
+ * transport that enforces deadlines settles the call with a typed
+ * `TransportTimeoutError` when no correlated reply arrives within
+ * `deadlineMs`. The parameter is also the teardown-class marking channel
+ * later phases read to keep caller-initiated teardown out of recovery — the
+ * budget class, not a new protocol flag, distinguishes the call.
+ */
+export interface TransportRequestOptions {
+  /** Per-call deadline budget in milliseconds; transports default to the interactive class. */
+  deadlineMs?: number;
+}
+
 export interface OpenTrayTransport {
-  request(frame: ClientRequestFrame): Promise<ServerFrame>;
+  request(frame: ClientRequestFrame, options?: TransportRequestOptions): Promise<ServerFrame>;
+}
+
+/**
+ * Default per-call deadline classes (W1, harden-transport-robustness;
+ * field-validated against the pnpm-pub silent-wedge incident): interactive
+ * calls settle or reject within 5 s, teardown-class frames within 2 s, and
+ * bootstrap-class round-trips (connection init and first bring-up) within
+ * 10 s. They live beside `OpenTrayTransport` because they are part of the
+ * generic transport call contract, not of one broker implementation.
+ */
+export const INTERACTIVE_CALL_DEADLINE_MS = 5_000;
+export const TEARDOWN_CALL_DEADLINE_MS = 2_000;
+export const BOOTSTRAP_CALL_DEADLINE_MS = 10_000;
+
+/**
+ * Typed per-call deadline rejection: the transport's budget for one
+ * round-trip expired without a correlated reply. This is the third
+ * rejection class, distinct from transport-lost (the plain
+ * `BROKER_CONNECTION_CLOSED_MESSAGE` sentinel family, or the typed
+ * `extension_transport_closed` for accepted deferred operations) and from
+ * broker-rejected (`BrokerServerError` / `ExtensionOperationError`). An
+ * expiry settles exactly one call; it never declares the transport dead —
+ * death stays a socket-close/error (and, later, heartbeat) verdict.
+ */
+export class TransportTimeoutError extends Error {
+  readonly requestId: RequestId;
+  readonly deadlineMs: number;
+
+  constructor(requestId: RequestId, deadlineMs: number) {
+    super(`transport call deadline expired after ${deadlineMs}ms: ${requestId}`);
+    this.name = "TransportTimeoutError";
+    this.requestId = requestId;
+    this.deadlineMs = deadlineMs;
+  }
 }
 
 export type OpenTrayEventFrame = Extract<
@@ -423,12 +470,20 @@ export function createTrayHandle(
     },
     async destroy(): Promise<void> {
       const requestId = nextRequestId();
-      const response = await transport.request({
-        type: "destroy-tray",
-        requestId,
-        appId,
-        trayId,
-      });
+      // Teardown-class budget (W3, harden-transport-robustness): the
+      // transport-level deadline bounds this round-trip so a wedged broker can
+      // never wedge consumer shutdown; no application-layer race wraps it.
+      // `deadlineMs` doubles as the teardown-class marker later phases read to
+      // keep caller-initiated teardown from ever triggering recovery.
+      const response = await transport.request(
+        {
+          type: "destroy-tray",
+          requestId,
+          appId,
+          trayId,
+        },
+        { deadlineMs: TEARDOWN_CALL_DEADLINE_MS },
+      );
       expectResponse(response, requestId, "ack");
     },
   };

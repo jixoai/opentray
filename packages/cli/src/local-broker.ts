@@ -32,8 +32,14 @@ import {
   type OpenTrayPackageIdentity,
 } from "@opentray/packaging";
 
-import type { OpenTrayTransport } from "./client";
-import { BrokerServerError } from "./client";
+import type { OpenTrayTransport, TransportRequestOptions } from "./client";
+import {
+  BOOTSTRAP_CALL_DEADLINE_MS,
+  INTERACTIVE_CALL_DEADLINE_MS,
+  TEARDOWN_CALL_DEADLINE_MS,
+  TransportTimeoutError,
+  BrokerServerError,
+} from "./client";
 import { resolveCallerLabel } from "./daemon/caller-label";
 import { createNodeDaemonDriver, startDaemon, type DaemonDriver } from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
@@ -99,6 +105,13 @@ const extensionTransportClosedError = (cause: Error): ExtensionOperationError =>
   );
 
 /**
+ * Correlation label the bootstrap deadline reports under: the init frame
+ * carries no requestId on the wire, so the typed timeout names the call class
+ * itself.
+ */
+const INIT_REQUEST_ID = "init";
+
+/**
  * Typed handshake rejection for a Ready frame whose protocol version does not
  * equal the version this client sent in its Init frame: a structurally valid
  * Ready frame alone must never accept the session (add-ext-dialog batch A
@@ -135,8 +148,21 @@ export interface LocalBrokerClient extends OpenTrayTransport {
    * caller-initiated graceful `close()` completes.
    */
   onConnectionDead(listener: (error: Error) => void): () => void;
+  /**
+   * Internal deadline-expiry observation seam (W1, harden-transport-robustness):
+   * not consumer API. A supervision layer (Phase C heartbeat) subscribes to
+   * attribute probe failures — an expiry settles one call and never declares
+   * the transport dead, but it counts as one liveness-failure signal.
+   */
+  onDeadlineExpiry(listener: (expiry: TransportDeadlineExpiry) => void): () => void;
   onEvent(listener: (frame: LocalRuntimeEventFrame) => void): () => void;
   close(): Promise<void>;
+}
+
+/** Payload of the internal deadline-expiry seam: which call class budget expired. */
+export interface TransportDeadlineExpiry {
+  readonly requestId: RequestId;
+  readonly deadlineMs: number;
 }
 
 export interface ConnectLocalBrokerOptions extends Partial<BrokerEndpointIdentityOptions> {
@@ -161,16 +187,30 @@ interface PendingRequest {
   resolve(frame: ServerFrame): void;
   reject(error: Error): void;
   /**
+   * Per-call deadline timer (W1): unref'd so library callers' process exit is
+   * never held open by an outstanding call; cleared on every settle path.
+   */
+  deadlineTimer?: ReturnType<typeof setTimeout> | undefined;
+  /**
    * Set when the matching `ext-command-accepted` frame arrives (add-ext-dialog
    * section 5.1 pending-until-final): the promise stays pending until exactly one
    * `ext-operation-terminal` settles it, and a transport death rejects it with
    * the generic typed `extension_transport_closed` instead of the plain
-   * transport sentinel.
+   * transport sentinel. Acceptance clears the deadline (two-phase law): the
+   * deadline bounds dispatch→acceptance — the transport round-trip the client
+   * owns — while the accepted operation awaits native completion that can be
+   * legitimately user-paced (a held modal dialog) and is bounded only by
+   * transport liveness, never by a transport deadline.
    */
   deferredOperation?: string;
 }
 
-interface BrokerSocket {
+/**
+ * Minimal structural socket the connection needs; exported so in-repo tests
+ * can drive the transport against deterministic fake sockets (never-answering
+ * brokers, wedged graceful ends) instead of timing-dependent real ones.
+ */
+export interface BrokerSocket {
   setEncoding(encoding: BufferEncoding): void;
   on(event: "data", listener: (chunk: Buffer | string) => void): void;
   on(event: "error", listener: (error: Error) => void): void;
@@ -180,6 +220,7 @@ interface BrokerSocket {
   off(event: "error", listener: (error: Error) => void): void;
   write(data: string): void;
   end(callback: () => void): void;
+  destroy(): void;
 }
 
 export const connectLocalBroker = async (
@@ -313,7 +354,7 @@ const normalizeAppIdentityField = (value: string | undefined): string | undefine
   return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 };
 
-class LocalBrokerConnection implements LocalBrokerClient {
+export class LocalBrokerConnection implements LocalBrokerClient {
   readonly endpoint: string;
   readonly callerLabel: string;
   sessionId = "";
@@ -324,6 +365,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
   /** operationId -> requestId of accepted-but-unsettled deferred operations. */
   private readonly deferredOperations = new Map<string, RequestId>();
   private readonly deadListeners = new Set<(error: Error) => void>();
+  private readonly deadlineExpiryListeners = new Set<(expiry: TransportDeadlineExpiry) => void>();
   private deadError: Error | undefined;
   private ready:
     | {
@@ -369,6 +411,13 @@ class LocalBrokerConnection implements LocalBrokerClient {
     };
   }
 
+  onDeadlineExpiry(listener: (expiry: TransportDeadlineExpiry) => void): () => void {
+    this.deadlineExpiryListeners.add(listener);
+    return () => {
+      this.deadlineExpiryListeners.delete(listener);
+    };
+  }
+
   async init(
     clientVersion: string,
     protocolVersion: number,
@@ -382,7 +431,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
       protocolVersion,
       clientVersion,
     });
-    const frame = await ready;
+    const frame = await this.raceBootstrapDeadline(ready);
     // A structurally valid Ready frame is not session authority: the broker
     // must speak exactly the protocol version this client announced (direct
     // connections have no daemon-readiness metadata protecting them).
@@ -399,7 +448,10 @@ class LocalBrokerConnection implements LocalBrokerClient {
     this.sessionId = frame.sessionId;
   }
 
-  async request(frame: ClientRequestFrame): Promise<ServerFrame> {
+  async request(
+    frame: ClientRequestFrame,
+    options: TransportRequestOptions = {},
+  ): Promise<ServerFrame> {
     if (this.pending.has(frame.requestId)) {
       throw new Error(`duplicate requestId: ${frame.requestId}`);
     }
@@ -412,8 +464,20 @@ class LocalBrokerConnection implements LocalBrokerClient {
       throw new Error(this.deadError.message);
     }
 
+    // Per-call budget (W1, harden-transport-robustness): a half-open transport
+    // where both processes stay alive but neither direction is delivered would
+    // otherwise hold this entry forever. Expiry settles exactly this call with
+    // the typed timeout rejection and removes the entry, so a late reply finds
+    // no owner; it never marks the transport dead.
+    const deadlineMs = options.deadlineMs ?? INTERACTIVE_CALL_DEADLINE_MS;
     const response = new Promise<ServerFrame>((resolve, reject) => {
-      this.pending.set(frame.requestId, { resolve, reject });
+      const deadlineTimer = setTimeout(() => {
+        this.expireRequest(frame.requestId, deadlineMs);
+      }, deadlineMs);
+      // Library semantics: an outstanding call must never keep the host
+      // process alive on its own.
+      deadlineTimer.unref();
+      this.pending.set(frame.requestId, { resolve, reject, deadlineTimer });
     });
     this.write(frame);
     return response;
@@ -434,8 +498,21 @@ class LocalBrokerConnection implements LocalBrokerClient {
       return;
     }
     this.write({ type: "exit" });
+    // Wall-clock-bounded graceful teardown (W3): a peer that never completes
+    // the half-close must not wedge consumer shutdown. `end` completing late
+    // degrades to `destroy`; either way close itself resolves — it never
+    // rejects with a timeout, keeping the graceful-close sentinel semantics
+    // (the subsequent socket close reports through the existing death path).
     await new Promise<void>((resolve) => {
-      this.socket.end(resolve);
+      const degrade = setTimeout(() => {
+        this.socket.destroy();
+        resolve();
+      }, TEARDOWN_CALL_DEADLINE_MS);
+      degrade.unref();
+      this.socket.end(() => {
+        clearTimeout(degrade);
+        resolve();
+      });
     });
   }
 
@@ -480,8 +557,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
         details: frame.details,
       });
       if (frame.requestId !== undefined) {
-        this.pending.get(frame.requestId)?.reject(error);
-        this.pending.delete(frame.requestId);
+        this.takePending(frame.requestId)?.reject(error);
         return;
       }
       // An error with no requestId could not be correlated to a specific request.
@@ -509,9 +585,10 @@ class LocalBrokerConnection implements LocalBrokerClient {
 
     const requestId = responseRequestId(frame);
     if (requestId !== undefined) {
-      // Request responses and broker events are separate streams even on one socket.
-      this.pending.get(requestId)?.resolve(frame);
-      this.pending.delete(requestId);
+      // Request responses and broker events are separate streams even on one
+      // socket. A reply arriving after its deadline finds no entry — the
+      // stateless late-settlement discard (W1) — and settles nothing.
+      this.takePending(requestId)?.resolve(frame);
       return;
     }
 
@@ -535,7 +612,10 @@ class LocalBrokerConnection implements LocalBrokerClient {
    * settles the request. The broker's owner loop guarantees exactly one
    * terminal per operation; a second acceptance for the same request or an
    * already-bound operationId is defensively ignored, never a second
-   * registration.
+   * registration. Acceptance also stops the call's deadline: dispatch was the
+   * bounded transport phase the client owns, and the accepted operation now
+   * awaits a native terminal that can be legitimately user-paced (a held modal
+   * dialog), bounded only by transport liveness.
    */
   private acceptDeferredOperation(requestId: RequestId, operationId: string): void {
     const entry = this.pending.get(requestId);
@@ -547,6 +627,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
     }
     entry.deferredOperation = operationId;
     this.deferredOperations.set(operationId, requestId);
+    this.clearDeadline(entry);
   }
 
   /**
@@ -555,17 +636,17 @@ class LocalBrokerConnection implements LocalBrokerClient {
    * typed wire error (`"error"`). Terminals for unknown or already-settled
    * operationIds are silently dropped - the broker side already settles
    * through a one-shot CAS; the client mirrors that stateless drop instead of
-   * guessing an owner.
+   * guessing an owner. A terminal arriving after the call's deadline expired
+   * is the same stateless drop (W1).
    */
   private settleDeferredOperation(operationId: string, payload: ExtOperationPayload): void {
     const requestId = this.deferredOperations.get(operationId);
     if (requestId === undefined) {
       return;
     }
-    const entry = this.pending.get(requestId);
-    this.deferredOperations.delete(operationId);
-    this.pending.delete(requestId);
+    const entry = this.takePending(requestId);
     if (entry === undefined) {
+      this.deferredOperations.delete(operationId);
       return;
     }
     if (payload.kind === "result") {
@@ -587,10 +668,99 @@ class LocalBrokerConnection implements LocalBrokerClient {
     );
   }
 
+  /**
+   * Removes and fully cleans one pending entry: clears its deadline timer and
+   * the deferred-operation reverse mapping, so every settle path (response,
+   * correlated error, deferred terminal, expiry) leaves no timer or mapping
+   * behind.
+   */
+  private takePending(requestId: RequestId): PendingRequest | undefined {
+    const entry = this.pending.get(requestId);
+    if (entry === undefined) {
+      return undefined;
+    }
+    this.pending.delete(requestId);
+    this.clearDeadline(entry);
+    if (entry.deferredOperation !== undefined) {
+      this.deferredOperations.delete(entry.deferredOperation);
+    }
+    return entry;
+  }
+
+  private clearDeadline(entry: PendingRequest): void {
+    if (entry.deadlineTimer !== undefined) {
+      clearTimeout(entry.deadlineTimer);
+      entry.deadlineTimer = undefined;
+    }
+  }
+
+  /**
+   * Deadline expiry (W1): settles exactly this call with the typed timeout
+   * rejection and removes its entries, so a late reply or terminal finds no
+   * owner. Deliberately NOT `markDead` — an unanswered call is one liveness
+   * signal, not a death verdict; the connection stays usable and the death
+   * listeners stay silent. The expiry is reported through the internal seam
+   * for the Phase C heartbeat's failure classification.
+   */
+  private expireRequest(requestId: RequestId, deadlineMs: number): void {
+    const entry = this.pending.get(requestId);
+    if (entry === undefined) {
+      return;
+    }
+    this.takePending(requestId);
+    this.notifyDeadlineExpiry({ requestId, deadlineMs });
+    entry.reject(new TransportTimeoutError(requestId, deadlineMs));
+  }
+
+  /**
+   * Bootstrap-class budget (W1): the Ready frame must arrive within
+   * `BOOTSTRAP_CALL_DEADLINE_MS` or init settles with the typed timeout
+   * rejection. Like per-call expiry this never marks the transport dead —
+   * `connectLocalBroker`'s error path performs the bounded close.
+   */
+  private raceBootstrapDeadline(
+    ready: Promise<Extract<ServerFrame, { type: "ready" }>>,
+  ): Promise<Extract<ServerFrame, { type: "ready" }>> {
+    return new Promise((resolve, reject) => {
+      let bootstrapTimer: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
+        bootstrapTimer = undefined;
+        this.notifyDeadlineExpiry({
+          requestId: INIT_REQUEST_ID,
+          deadlineMs: BOOTSTRAP_CALL_DEADLINE_MS,
+        });
+        reject(new TransportTimeoutError(INIT_REQUEST_ID, BOOTSTRAP_CALL_DEADLINE_MS));
+      }, BOOTSTRAP_CALL_DEADLINE_MS);
+      bootstrapTimer.unref();
+      const settle = (settleFn: () => void): void => {
+        if (bootstrapTimer !== undefined) {
+          clearTimeout(bootstrapTimer);
+          bootstrapTimer = undefined;
+        }
+        settleFn();
+      };
+      ready.then(
+        (frame) => settle(() => resolve(frame)),
+        (error) => settle(() => reject(error)),
+      );
+    });
+  }
+
+  private notifyDeadlineExpiry(expiry: TransportDeadlineExpiry): void {
+    for (const listener of [...this.deadlineExpiryListeners]) {
+      try {
+        listener(expiry);
+      } catch {
+        // A throwing seam listener must not block expiry propagation to the
+        // remaining listeners.
+      }
+    }
+  }
+
   private rejectAll(error: Error): void {
     this.ready?.reject(error);
     this.ready = undefined;
     for (const pending of this.pending.values()) {
+      this.clearDeadline(pending);
       pending.reject(error);
     }
     this.pending.clear();
@@ -615,6 +785,7 @@ class LocalBrokerConnection implements LocalBrokerClient {
     this.ready?.reject(error);
     this.ready = undefined;
     for (const pending of this.pending.values()) {
+      this.clearDeadline(pending);
       pending.reject(
         pending.deferredOperation === undefined ? error : extensionTransportClosedError(error),
       );
