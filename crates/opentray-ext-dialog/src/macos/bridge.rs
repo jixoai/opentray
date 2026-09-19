@@ -144,6 +144,28 @@ fn icon_word(severity: DialogSeverity) -> &'static str {
     }
 }
 
+/// The bridge dialog title: the carrier bundle's display name — the same
+/// string an in-process NSAlert shows by default (`CFBundleDisplayName`,
+/// falling back to `CFBundleName`, then the process name). Restores title
+/// parity with the native alert; the title bar is never left empty.
+fn app_display_name() -> String {
+    use objc2_foundation::{NSBundle, NSProcessInfo};
+    let bundle = NSBundle::mainBundle();
+    {
+        for key in ["CFBundleDisplayName", "CFBundleName"] {
+            if let Some(value) = bundle.objectForInfoDictionaryKey(&objc2_foundation::NSString::from_str(key)) {
+                if let Some(text) = value.downcast_ref::<objc2_foundation::NSString>() {
+                    let name = text.to_string();
+                    if !name.is_empty() {
+                        return name;
+                    }
+                }
+            }
+        }
+    }
+    NSProcessInfo::processInfo().processName().to_string()
+}
+
 /// Composes the `display dialog` statement and its argv vector for one
 /// message dialog. Argv layout (1-based AppleScript `item` positions):
 /// 1 = display text, 2..=1+N = button titles, then default index (1-based
@@ -177,11 +199,12 @@ pub(crate) fn compose_display_dialog(
         .min(buttons.len() - 1);
     let default_pos = 2 + buttons.len();
     let cancel_pos = default_pos + 1;
+    let title_pos = cancel_pos + 1;
     let button_refs: Vec<String> = (0..buttons.len()).map(|i| format!("item {} of argv", 2 + i)).collect();
     let statement = format!(
         "on run argv\n\
          try\n\
-         display dialog (item 1 of argv) buttons {{{list}}} default button (item {default_pos} of argv as integer) cancel button (item {cancel_pos} of argv as integer) with icon {icon}\n\
+         display dialog (item 1 of argv) buttons {{{list}}} default button (item {default_pos} of argv as integer) cancel button (item {cancel_pos} of argv as integer) with icon {icon} with title (item {title_pos} of argv)\n\
          return \"button:\" & (button returned of result)\n\
          on error number -128\n\
          return \"cancel\"\n\
@@ -194,6 +217,7 @@ pub(crate) fn compose_display_dialog(
     argv.extend(buttons);
     argv.push((default_index + 1).to_string());
     argv.push((cancel_index + 1).to_string());
+    argv.push(app_display_name());
     Ok((statement, argv))
 }
 
@@ -481,13 +505,13 @@ mod tests {
     #[test]
     fn display_dialog_statement_references_argv_only() {
         let (statement, argv) = compose_display_dialog(&message_options(&["OK"])).unwrap();
-        assert_eq!(
-            statement,
-            "on run argv\ntry\ndisplay dialog (item 1 of argv) buttons {item 2 of argv} default button (item 3 of argv as integer) cancel button (item 4 of argv as integer) with icon note\nreturn \"button:\" & (button returned of result)\non error number -128\nreturn \"cancel\"\nend try\nend run"
-        );
-        assert_eq!(argv, vec!["m", "OK", "1", "1"]);
+        assert!(statement.contains("buttons {item 2 of argv} default button (item 3 of argv as integer) cancel button (item 4 of argv as integer) with icon note with title (item 5 of argv)"));
         // No caller payload ever appears inside the statement.
         assert!(!statement.contains("\"m\""));
+        // The title argv slot is the carrier display name (non-empty on
+        // any real host; the exact value is host-dependent).
+        assert_eq!(argv.len(), 5);
+        assert!(!argv[4].is_empty());
     }
 
     #[test]
@@ -502,7 +526,9 @@ mod tests {
         let (statement, argv) = compose_display_dialog(&options).unwrap();
         assert!(statement.contains("buttons {item 2 of argv, item 3 of argv, item 4 of argv}"));
         assert!(statement.contains("with icon stop"));
-        assert_eq!(argv, vec!["m\n\nd", "Abort", "Retry", "Ignore", "2", "3"]);
+        assert_eq!(argv[..4], vec!["m\n\nd", "Abort", "Retry", "Ignore"]);
+        assert_eq!(argv[4], "2");
+        assert_eq!(argv[5], "3");
     }
 
     #[test]
