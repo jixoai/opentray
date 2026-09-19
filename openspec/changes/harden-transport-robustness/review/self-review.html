@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>harden-transport-robustness — self review</title>
+<style>
+  body { font: 14px/1.55 -apple-system, "Segoe UI", sans-serif; margin: 2rem auto; max-width: 60rem; color: #1a1a1a; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 1.8rem; border-bottom: 1px solid #ddd; padding-bottom: .3rem; }
+  table { border-collapse: collapse; width: 100%; margin: .8rem 0; }
+  th, td { border: 1px solid #ddd; padding: .45rem .6rem; text-align: left; vertical-align: top; }
+  th { background: #f6f6f6; }
+  code { font: 12px ui-monospace, monospace; background: #f2f2f2; padding: 0 .25rem; }
+  .ok { color: #0a7d24; font-weight: 600; } .note { color: #8a6100; }
+  ul { padding-left: 1.2rem; } li { margin: .25rem 0; }
+</style>
+</head>
+<body>
+<h1>harden-transport-robustness — self review (issue #11)</h1>
+
+<h2>Work items → landing evidence</h2>
+<table>
+<tr><th>Item</th><th>Landing</th><th>Evidence</th></tr>
+<tr><td>W1 per-call deadlines</td><td><code>f059dc7a</code> + two-phase law <code>09cc0e07</code></td><td>185/185 incl. never-settle / late-discard / happy-path-zero-cost</td></tr>
+<tr><td>W2 death detection</td><td><code>18bb4e1e</code> supervision heartbeat</td><td>idle-gated probe tests; socket-close instant death</td></tr>
+<tr><td>W3 bounded teardown</td><td><code>f059dc7a</code></td><td>wedged destroy bounded (2s) while native destroy still issued; P3.6 preserved</td></tr>
+<tr><td>W4 recovery + rebuild</td><td><code>18bb4e1e</code></td><td>journal replay assertions (trayId injection, LWW, mount order); ext-webview rebuild + snapshot</td></tr>
+<tr><td>W5 budget + give-up</td><td><code>18bb4e1e</code></td><td>exhaustion: exactly maxRestarts attempts → fail-fast <code>TransportAbandonedError</code> + <code>abandoned</code></td></tr>
+<tr><td>W6 hooks</td><td><code>18bb4e1e</code> / <code>ad737c25</code></td><td>Tier 1 edge events; Tier 2 exactly-once hand-over; every key defaulted</td></tr>
+<tr><td>W7 broker road repair</td><td><code>c918d704</code> + <code>da731621</code></td><td>macOS 146/146; Windows relay 131/131 (5 mirrored escalation tests); H3 proven by probe then fixed</td></tr>
+<tr><td>W8 permanent drill</td><td><code>68dc791f</code></td><td>kill -9 leg (real broker, loud skip w/o binary) + deterministic exhaustion leg</td></tr>
+<tr><td>W9 docs</td><td><code>ad737c25</code></td><td>skills/opentray reference + routing; cli README API contract</td></tr>
+</table>
+
+<h2>Incident root causes → structural fixes</h2>
+<table>
+<tr><th>Hypothesis (2026-09-15 wedge)</th><th>Fix</th><th>Regression test</th></tr>
+<tr><td>H1 dead-session black hole (swallowed write errors, no liveness)</td><td>write failure/queue-full → session disconnect escalation; client heartbeat declares half-open death</td><td><code>writer_socket_failure_escalates_disconnected</code>; heartbeat wedge tests; stopped-drain e2e both platforms</td></tr>
+<tr><td>H2 owner-loop write park (AppKit thread blocked in write_all)</td><td>owner loop enqueues only; bounded FIFO + dedicated writer per session</td><td><code>full_outbound_queue_escalates_without_parking_the_producer</code> (both platforms)</td></tr>
+<tr><td>H3 loop-exited-but-alive broker (listener join hang, endpoint rebound)</td><td>nonblocking accept + 20ms poll; 500ms bounded join w/ detach; (dev,ino)-guarded endpoint removal</td><td><code>listener_shutdown_is_bounded_when_the_endpoint_was_rebound</code> + Windows sibling</td></tr>
+</table>
+
+<h2>Verification gates</h2>
+<ul>
+  <li class="ok">cli 185/185 · typecheck ✓ · ext-webview 82/82 · typecheck ✓</li>
+  <li class="ok">cargo <code>opentray-bin</code> 146/146 (macOS) · 131/131 (Windows relay @ <code>da731621</code>)</li>
+  <li class="ok">verify legs: spec-consistency · vision 49 · binaries · schemas · <code>openspec validate --all --strict</code> 58 · <code>git diff --check</code></li>
+  <li class="ok">builds: opentray, @opentray/ext-webview</li>
+  <li class="note">Full recursive <code>pnpm run test</code>: pre-existing local vitest worker-startup flake in packages/create (all tests pass; reproduced identically at baseline <code>6dbc6f20</code>; CI green at baseline) — environment, not this change.</li>
+</ul>
+
+<h2>Open items for Owner</h2>
+<ul>
+  <li>Codex review was defaulted off (unreachable question gate); can still be requested pre-release.</li>
+  <li>Tier-0 default-on ships enabled — release-note framing sign-off welcome.</li>
+  <li>pnpm-pub compensation-layer deletion (the issue's layering test) belongs to that repo, post-release.</li>
+  <li>Optional: Windows relay run of the TS drill leg (needs a built broker there).</li>
+</ul>
+
+<h2>Commits</h2>
+<p><code>918ec9a5</code> <code>90758c46</code> <code>35639433</code> <code>09cc0e07</code> <code>f059dc7a</code> <code>ec86c589</code> <code>c918d704</code> <code>b7d8e844</code> <code>da731621</code> <code>2b70916e</code> <code>18bb4e1e</code> <code>34d30a01</code> <code>68dc791f</code> <code>ad737c25</code> <code>87f5f8fb</code> + changeset</p>
+</body>
+</html>

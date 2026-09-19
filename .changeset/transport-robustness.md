@@ -1,0 +1,7 @@
+---
+"opentray": minor
+---
+
+Transport robustness (issue #11): bounded round-trips, broker-death detection, and zero-config in-process recovery.
+
+Every transport call is deadline-bounded (interactive 5s, teardown 2s, bootstrap 10s) and settles with a typed `TransportTimeoutError` instead of hanging; deferred operations follow a two-phase rule so user-held dialogs are never killed by a transport deadline. Uninvited broker death — socket close, or a half-open connection detected by the new idle-gated heartbeat — recovers automatically with zero consumer code: cooldown backoff, broker respawn through the same identity-gated connect path, declarative state replay (tray options, last-set mutations, extension mounts, WebView windows with styles and subscriptions), then a full state snapshot re-emit. A 3-per-10-minute budget bounds the loop; exhaustion degrades to fail-fast `TransportAbandonedError` calls plus the terminal `abandoned` state while the app keeps running headless. `tray.onTransportStateChange` projects `healthy | recovering | abandoned`; `runtimeOptions.recovery` exposes the policy knobs and the Tier 2 `restartApp` hand-over. On the broker side, socket writes leave the native owner loop (bounded per-session queues with dedicated writers on both platforms), write failures and full queues escalate to session disconnect instead of vanishing, and listener shutdown is bounded end to end. A permanent kill -9 drill gates recovery in the test suite.
