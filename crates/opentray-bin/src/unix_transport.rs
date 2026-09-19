@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::{create_dir_all, remove_file, File};
-use std::io::{BufRead, BufReader, ErrorKind, Write};
+use std::io::{BufRead, BufReader, BufWriter, ErrorKind, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::mpsc::{self, SyncSender, TrySendError};
@@ -397,12 +397,22 @@ pub fn spawn_listener(
 /// written. Every producer (owner loop dispatch, extension drains, reader
 /// error frames) enqueues into the bounded FIFO, so a wedged client socket
 /// parks at most this thread — never the native owner loop.
+///
+/// The stream is written through a `BufWriter` flushed once per frame.
+/// Serializing straight onto the raw descriptor issues one syscall per JSON
+/// token, and Linux charges every AF_UNIX write's skb truesize (hundreds of
+/// bytes) against `SO_SNDBUF`: a burst of tokenized frames against a
+/// not-yet-draining peer exhausts the send-buffer accounting after a few
+/// hundred small writes and parks this thread mid-frame (empirical:
+/// 64 frames ≈ 1.2k tiny writes block; the same bytes in per-frame writes
+/// complete in ~1 ms). One flush per frame keeps wire lines atomic.
 fn spawn_writer(
-    mut stream: UnixStream,
+    stream: UnixStream,
     outbound: mpsc::Receiver<ServerFrame>,
     writer: Writer,
 ) {
     thread::spawn(move || {
+        let mut stream = BufWriter::new(stream);
         for frame in outbound {
             if let Err(error) = serialize_frame(&mut stream, &frame) {
                 eprintln!("opentray client write error: {error}");
@@ -768,9 +778,11 @@ fn spawn_reader(id: u64, stream: UnixStream, writer: Writer, send: EventSender) 
     });
 }
 
-/// Serializes one frame onto the writer thread's stream. Runs only on the
-/// dedicated writer thread; failures there escalate the session disconnect.
-fn serialize_frame(stream: &mut UnixStream, frame: &ServerFrame) -> std::io::Result<()> {
+/// Serializes one frame onto the writer thread's buffered stream and flushes
+/// it, so exactly one complete wire line leaves the process per call. Runs
+/// only on the dedicated writer thread; failures there escalate the session
+/// disconnect.
+fn serialize_frame(stream: &mut BufWriter<UnixStream>, frame: &ServerFrame) -> std::io::Result<()> {
     serde_json::to_writer(&mut *stream, frame)?;
     stream.write_all(b"\n")?;
     stream.flush()
