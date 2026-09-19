@@ -27,7 +27,7 @@
 - [x] 3.2 队列满/不可排水 → 同一升级路径，绝不 park 生产者；owner loop 不再出现阻塞 socket 写。
   - 证据：`full_outbound_queue_escalates_without_parking_the_producer`（<1s 断言）。
 - [x] 3.3 Windows：pump 队列改有界（1024）+ 同升级语义（对死客户端不再无界增长）。
-  - 证据：c918d704 windows_transport.rs 对称 OutboundWriter；gnu 目标交叉编译过（真机验收列 Windows 中继项）。
+  - 证据：c918d704 windows_transport.rs 对称 OutboundWriter；镜像测试 da731621 五件套（满队升级+去重/FIFO/wedged drain 有界/无客户端 shutdown 有界/停止排水管道客户端有界升级）；**真机验收（LAN 中继 gaubeehonor，worktree @ da731621）：131 通过 0 失败**，含全部 5 个新 windows_transport 测试。
 - [x] 3.4 H3 调查：listener-shutdown join 悬挂路径加固（endpoint 被 rebound 时 loop-exited broker 不得存活悬挂）；结论无论修复与否写入 change 记录。
   - 证据：悬挂为真（独立探针复刻旧代码形状 3s watchdog 触发 HUNG）；修复 = nonblocking accept + 20ms tick + 500ms 有界 join（超时 detach）+ endpoint 按 (dev,ino) 保全；回归测试 `listener_shutdown_is_bounded_when_the_endpoint_was_rebounded`。
 - [x] 3.5 Rust 测试：写失败→disconnect 升级；owner loop 不被写阻塞；停止排水的客户端在有界时间内让 broker 升级该 session。
