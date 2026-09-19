@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-sound",
-  "version": "0.31.1",
+  "version": "0.31.2",
   "description": "Official OpenTray native sound extension: system beeps, named system sounds, and low-cost file playback.",
   "type": "module",
   "license": "MIT",
