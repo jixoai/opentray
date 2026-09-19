@@ -4,10 +4,10 @@ use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{ErrorKind, Read, Write};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc,
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+    Arc, Condvar, Mutex,
 };
 use std::thread::{self, JoinHandle};
 
@@ -27,9 +27,106 @@ use windows_sys::Win32::System::Pipes::{
 
 use crate::BrokerOptions;
 
-pub type Writer = mpsc::Sender<ServerFrame>;
+pub type Writer = Arc<OutboundWriter>;
 type EventSender = Arc<dyn Fn(TransportEvent) + Send + Sync>;
 const PIPE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Per-session pump-queue bound, in frames — same policy and magnitude as
+/// the Unix outbound queue: frames on this pipe are protocol-shaped JSON
+/// (responses, events, envelopes), so 1024 frames bounds worst-case
+/// outbound memory to the low single-digit MiB range while converting a
+/// client that stops draining into a bounded-time disconnect instead of
+/// unbounded queue growth against a dead pipe.
+const OUTBOUND_QUEUE_CAPACITY: usize = 1024;
+
+/// Owner-loop write handle: a bounded FIFO drained by the dedicated pipe
+/// pump. The owner loop must never park on a full queue (the transport-
+/// robustness "never block the native owner loop" law): enqueue is
+/// `try_send`, and a full queue means the client stopped draining — a dead
+/// session escalated through the disconnect path, never a parked producer
+/// and never silent frame loss.
+pub struct OutboundWriter {
+    id: u64,
+    queue: SyncSender<ServerFrame>,
+    events: EventSender,
+    escalated: AtomicBool,
+    /// Frames enqueued but not yet written+flushed by the pipe pump. Lets
+    /// the broker's exit path give final frames (the Exit ack) a bounded
+    /// delivery window before the process tears the pipe down.
+    pending: AtomicUsize,
+}
+
+impl OutboundWriter {
+    fn new(id: u64, events: EventSender) -> (Writer, Receiver<ServerFrame>) {
+        let (queue, outbound) = mpsc::sync_channel(OUTBOUND_QUEUE_CAPACITY);
+        (
+            Arc::new(Self {
+                id,
+                queue,
+                events,
+                escalated: AtomicBool::new(false),
+                pending: AtomicUsize::new(0),
+            }),
+            outbound,
+        )
+    }
+
+    /// Enqueue one outbound frame. Never blocks and never silently drops:
+    /// both non-draining reasons (queue full, pump gone) escalate the
+    /// session through the disconnect path.
+    pub fn enqueue(&self, frame: ServerFrame) {
+        self.pending.fetch_add(1, Ordering::AcqRel);
+        match self.queue.try_send(frame) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {
+                self.pending.fetch_sub(1, Ordering::AcqRel);
+                self.escalate("outbound queue full: client stopped draining");
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                self.pending.fetch_sub(1, Ordering::AcqRel);
+                self.escalate("outbound pipe pump exited: client pipe unusable");
+            }
+        }
+    }
+
+    /// Waits until the pipe pump has written+flushed every enqueued frame,
+    /// within `budget`. Used only on the broker-exit path so the Exit ack
+    /// keeps its pre-queue delivery guarantee.
+    pub fn drain_outbound(&self, budget: Duration) -> bool {
+        let deadline = std::time::Instant::now() + budget;
+        while self.pending.load(Ordering::Acquire) > 0 {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        true
+    }
+
+    /// Escalate to the session-disconnect path — the same
+    /// `TransportEvent::Disconnected` the pump emits on pipe errors — so
+    /// session cleanup runs through its existing chain and the failure is
+    /// observable in broker diagnostics. The flag keeps the first
+    /// escalation authoritative; the pump's own error-path escalation may
+    /// race it and the duplicate is absorbed by idempotent session removal.
+    fn escalate(&self, reason: &str) {
+        if self.escalated.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        eprintln!("opentray client session {} outbound escalation: {reason}", self.id);
+        (self.events)(TransportEvent::Disconnected { id: self.id });
+    }
+}
+
+impl std::fmt::Debug for OutboundWriter {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OutboundWriter")
+            .field("id", &self.id)
+            .field("escalated", &self.escalated.load(Ordering::SeqCst))
+            .finish_non_exhaustive()
+    }
+}
 
 #[derive(Debug)]
 pub enum TransportEvent {
@@ -50,26 +147,70 @@ impl TransportSession {
         }
     }
 
+    /// Owner-loop write point: enqueue only, never blocking pipe IO. The
+    /// pump queue is one FIFO per session, so command response frames
+    /// enqueued ahead of that dispatch's mirrored event frames stay ahead
+    /// on the wire — the EventPort ordering law ("response frames before
+    /// mirror-event frames") is preserved by queue order, never by pump
+    /// timing.
     pub fn write_frame(&mut self, frame: ServerFrame) {
-        let _ = self.writer.send(frame);
+        self.writer.enqueue(frame);
+    }
+
+    /// Bounded final-flush for the broker-exit path (see
+    /// [`OutboundWriter::drain_outbound`]).
+    pub fn flush_outbound(&mut self, budget: Duration) -> bool {
+        self.writer.drain_outbound(budget)
     }
 }
+
+/// Bounded wait for the accept thread's exit handshake — the Windows
+/// sibling of the Unix H3 hardening. `ConnectNamedPipe` blocks until a
+/// client reaches THIS pipe instance, and the shutdown wake-open is
+/// satisfied by ANY same-name instance (`PIPE_UNLIMITED_INSTANCES` lets
+/// other processes create instances too), so the join must have a budget:
+/// on timeout the handle is dropped, detaching the thread, and broker exit
+/// is never parked.
+const LISTENER_JOIN_BUDGET: Duration = Duration::from_millis(500);
 
 pub struct ListenerHandle {
     shutdown: Arc<AtomicBool>,
     endpoint: String,
+    accept_exited: Arc<(Mutex<bool>, Condvar)>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl ListenerHandle {
     pub fn shutdown(mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
+        // Wake a blocking ConnectNamedPipe with one client open of the pipe
+        // name.
         let _ = OpenOptions::new()
             .read(true)
             .write(true)
             .open(&self.endpoint);
+        let accept_exited = {
+            let (lock, cvar) = &*self.accept_exited;
+            // Lock poisoning means the accept thread panicked before its
+            // exit handshake; the bounded wait below still applies.
+            let mut exited = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !*exited {
+                let (guard, _) = cvar
+                    .wait_timeout_while(exited, LISTENER_JOIN_BUDGET, |exited| !*exited)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                exited = guard;
+            }
+            *exited
+        };
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            if accept_exited {
+                let _ = thread.join();
+            } else {
+                eprintln!(
+                    "opentray listener accept thread missed the shutdown budget; detaching it so \
+                     broker exit is not parked"
+                );
+            }
         }
     }
 }
@@ -87,6 +228,8 @@ pub fn spawn_listener(
     let send: EventSender = Arc::new(send);
     let next_id = Arc::new(AtomicU64::new(1));
     let endpoint_thread = endpoint.clone();
+    let accept_exited = Arc::new((Mutex::new(false), Condvar::new()));
+    let accept_exited_thread = accept_exited.clone();
     let thread = thread::spawn(move || {
         let mut pending_pipe = Some(first_pipe);
         while !shutdown_thread.load(Ordering::SeqCst) {
@@ -114,18 +257,24 @@ pub fn spawn_listener(
             }
 
             let id = next_id.fetch_add(1, Ordering::SeqCst);
-            let (writer, outbound) = mpsc::channel::<ServerFrame>();
+            let (writer, outbound) = OutboundWriter::new(id, send.clone());
             send(TransportEvent::Connected {
                 id,
                 writer: writer.clone(),
             });
-            spawn_pipe_pump(id, pipe, outbound, send.clone());
+            spawn_pipe_pump(id, pipe, outbound, writer, send.clone());
         }
+        // Exit handshake for the bounded shutdown join.
+        if let Ok(mut exited) = accept_exited_thread.0.lock() {
+            *exited = true;
+        }
+        accept_exited_thread.1.notify_all();
     });
 
     Ok(ListenerHandle {
         shutdown,
         endpoint,
+        accept_exited,
         thread: Some(thread),
     })
 }
@@ -165,21 +314,29 @@ pub fn build_runtime_host_health(
     }
 }
 
-fn spawn_pipe_pump(id: u64, mut stream: File, outbound: Receiver<ServerFrame>, send: EventSender) {
+fn spawn_pipe_pump(
+    id: u64,
+    mut stream: File,
+    outbound: Receiver<ServerFrame>,
+    writer: Writer,
+    send: EventSender,
+) {
     thread::spawn(move || {
         // Keep synchronous named-pipe reads and writes on one thread; cloned handles can block
         // each other on Windows while a read is pending.
         let mut inbound = Vec::<u8>::new();
         loop {
-            if !drain_outbound(&mut stream, &outbound) {
+            if !drain_outbound(&mut stream, &outbound, &writer) {
                 break;
             }
 
             match available_pipe_bytes(&stream) {
                 Ok(0) => match outbound.recv_timeout(PIPE_POLL_INTERVAL) {
                     Ok(frame) => {
-                        if let Err(error) = write_frame_to_pipe(&mut stream, &frame) {
-                            eprintln!("opentray client write error: {error}");
+                        // The producer's enqueue already counted this frame;
+                        // write it here (same thread discipline as
+                        // drain_outbound) and settle the count in the helper.
+                        if !write_pump_frame(&mut stream, &writer, &frame) {
                             break;
                         }
                     }
@@ -208,12 +365,32 @@ fn spawn_pipe_pump(id: u64, mut stream: File, outbound: Receiver<ServerFrame>, s
     });
 }
 
-fn drain_outbound(stream: &mut File, outbound: &Receiver<ServerFrame>) -> bool {
+/// Writes one queued frame to the pipe and settles its pending count.
+/// Returns false on a write failure; the caller breaks and the pump's exit
+/// path escalates the session disconnect.
+fn write_pump_frame(stream: &mut File, writer: &Writer, frame: &ServerFrame) -> bool {
+    let result = write_frame_to_pipe(stream, frame);
+    // Settle the count on both outcomes: a failed frame will never be
+    // written, so the exit-path drain must not wait on it.
+    writer.pending.fetch_sub(1, Ordering::AcqRel);
+    match result {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("opentray client write error: {error}");
+            false
+        }
+    }
+}
+
+fn drain_outbound(
+    stream: &mut File,
+    outbound: &Receiver<ServerFrame>,
+    writer: &Writer,
+) -> bool {
     loop {
         match outbound.try_recv() {
             Ok(frame) => {
-                if let Err(error) = write_frame_to_pipe(stream, &frame) {
-                    eprintln!("opentray client write error: {error}");
+                if !write_pump_frame(stream, writer, &frame) {
                     return false;
                 }
             }

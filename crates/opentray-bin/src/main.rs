@@ -601,6 +601,12 @@ mod native_broker {
         IdleExpired(u64),
     }
 
+    /// Bounded delivery window for final outbound frames (the Exit ack) on
+    /// the broker-exit path. Generous against a healthy drain (which
+    /// completes in microseconds) while keeping the exit of a wedged
+    /// session bounded.
+    const EXIT_FLUSH_BUDGET: Duration = Duration::from_millis(250);
+
     /// Winit wake adapter: the owner loop is the winit user-event loop on
     /// macOS and Windows, so a drain request is one proxy user event. This
     /// is a host adapter; the C ABI never exposes the loop.
@@ -1006,6 +1012,17 @@ mod native_broker {
                     };
                     self.drain_deferred_terminals(closing_session);
                     if matches!(exit_action, BrokerDisconnectAction::ExitOwnedBroker) {
+                        // Final-flush law: response frames (including the Exit
+                        // ack) ride the bounded outbound queue since the
+                        // owner-loop write discipline change, so the exit path
+                        // gives the writer thread a bounded delivery window
+                        // before tearing the process down — a healthy drain
+                        // completes in microseconds, a wedged client is
+                        // abandoned after the budget. Once-per-process wait on
+                        // the owner loop.
+                        if let Some(session) = self.sessions.get_mut(&id) {
+                            session.flush_outbound(EXIT_FLUSH_BUDGET);
+                        }
                         self.sessions.remove(&id);
                         self.bump_idle_generation();
                         self.schedule_idle_if_empty();
