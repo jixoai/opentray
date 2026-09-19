@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-dialog",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "description": "Official OpenTray native dialog extension: OS message boxes and file pickers.",
   "type": "module",
   "license": "MIT",
