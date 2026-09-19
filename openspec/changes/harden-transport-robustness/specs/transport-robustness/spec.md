@@ -3,12 +3,16 @@
 ### Requirement: Transport round-trips SHALL settle within a bounded deadline
 
 The client transport SHALL enforce a per-call deadline on every outstanding
-request-reply correlation, including deferred extension operations awaiting a
-terminal frame. Default budget classes SHALL be: interactive calls 5 s,
-teardown-class calls 2 s, and bootstrap-class calls (connection init and the
-first tray/webview bring-up) 10 s. Every budget class SHALL be overridable
-through one optional configuration object whose keys all have working
-defaults.
+request-reply correlation. For deferred extension operations the deadline
+bounds the dispatch-to-acceptance phase only: once the broker's acceptance
+frame arrives, the call awaits native completion that may be legitimately
+user-paced (a held modal dialog), so it SHALL NOT be settled by a transport
+deadline — it settles with exactly one terminal frame, or with the typed
+transport-close rejection when the transport dies. Default budget classes
+SHALL be: interactive calls 5 s, teardown-class calls 2 s, and
+bootstrap-class calls (connection init and the first tray/webview bring-up)
+10 s. Every budget class SHALL be overridable through one optional
+configuration object whose keys all have working defaults.
 
 A call whose budget expires SHALL settle with a typed timeout rejection
 distinct from transport-lost and broker-rejected rejections. A reply that
