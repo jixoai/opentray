@@ -22,11 +22,16 @@
 
 ## 3. Broker-side road repair（W7 — Phase B）
 
-- [ ] 3.1 Unix：出站帧改为有界 per-session 队列 + 专职 writer 线程；写/flush 错误升级为该 session 的 Disconnected 处理（session 清理 + 事件源吊销 + ExitOwnedBroker 行为保留）。
-- [ ] 3.2 队列满/不可排水 → 同一升级路径，绝不 park 生产者；owner loop 不再出现阻塞 socket 写。
-- [ ] 3.3 Windows：pump 队列改有界 + 同升级语义（对死客户端不再无界增长）。
-- [ ] 3.4 H3 调查：listener-shutdown join 悬挂路径加固（endpoint 被 rebound 时 loop-exited broker 不得存活悬挂）；结论无论修复与否写入 change 记录。
-- [ ] 3.5 Rust 测试：写失败→disconnect 升级；owner loop 不被写阻塞；停止排水的客户端在有界时间内让 broker 升级该 session。
+- [x] 3.1 Unix：出站帧改为有界 per-session 队列（1024 帧）+ 专职 writer 线程；写/flush 错误升级为该 session 的 Disconnected 处理（session 清理 + 事件源吊销 + ExitOwnedBroker 行为保留）。
+  - 证据：c918d704；升级一次性 CAS 去重 + eprintln 落 broker.log；owner loop 全部 9 个写点变纯入队。
+- [x] 3.2 队列满/不可排水 → 同一升级路径，绝不 park 生产者；owner loop 不再出现阻塞 socket 写。
+  - 证据：`full_outbound_queue_escalates_without_parking_the_producer`（<1s 断言）。
+- [x] 3.3 Windows：pump 队列改有界（1024）+ 同升级语义（对死客户端不再无界增长）。
+  - 证据：c918d704 windows_transport.rs 对称 OutboundWriter；gnu 目标交叉编译过（真机验收列 Windows 中继项）。
+- [x] 3.4 H3 调查：listener-shutdown join 悬挂路径加固（endpoint 被 rebound 时 loop-exited broker 不得存活悬挂）；结论无论修复与否写入 change 记录。
+  - 证据：悬挂为真（独立探针复刻旧代码形状 3s watchdog 触发 HUNG）；修复 = nonblocking accept + 20ms tick + 500ms 有界 join（超时 detach）+ endpoint 按 (dev,ino) 保全；回归测试 `listener_shutdown_is_bounded_when_the_endpoint_was_rebounded`。
+- [x] 3.5 Rust 测试：写失败→disconnect 升级；owner loop 不被写阻塞；停止排水的客户端在有界时间内让 broker 升级该 session。
+  - 证据：cargo test -p opentray-bin 146/146（基线 139），连续 3 轮绿 + 编排者复跑 1 轮绿；e2e 不排水客户端经真实 accept 路径有界升级；FIFO（ack 先于事件帧）；Exit 250ms 终末投递窗；升级即 shutdown 收敛 writer 线程（review 追加）。
 
 ## 4. Death detection + state surface（W2 / W6 Tier1 — Phase C）
 
