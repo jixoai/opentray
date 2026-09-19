@@ -3,8 +3,14 @@
 ## Current Round
 
 - Round: 1
-- Status: research-plan drafted (awaiting Owner rulings on open questions)
+- Status: apply in progress (Owner unreachable at the question gate 2026-09-20; defaults recorded below)
 - Previous plan backup: none (first version)
+
+Rulings taken as defaults (Owner may override at any later round; the question
+stays open in review rounds): Codex review not started — zcode-subagent
+cross-review replaces it per repo fallback; W7 ships in-change (Phase B);
+recovery budget in-memory per process; Tier-0 default-on recovery confirmed
+as the design intent of issue #11.
 
 ## Workflow Command Surface
 
