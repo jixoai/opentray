@@ -417,6 +417,36 @@ describe("@opentray/ext-dialog", () => {
     expect(transport.frames).toHaveLength(0);
   });
 
+  it("accepts darwin.icon and rejects malformed values before any state change", async () => {
+    const transport = new ScriptedTransport([() => terminalResult({ response: 0, suppressed: false })]);
+    const dialog = attachTestDialog("darwin", transport);
+
+    // Valid: the option rides the flat wire inside the darwin namespace.
+    await dialog.messageDialog({
+      message: "m",
+      darwin: { icon: "/System/Library/Image Capture/Support/Icons/module.icns" },
+    });
+    const lastFrame = transport.frames.at(-1) as { data: Record<string, unknown> };
+    expect(lastFrame.data).toMatchObject({
+      type: "messageDialog",
+      darwin: { icon: "/System/Library/Image Capture/Support/Icons/module.icns" },
+    });
+
+    await expect(
+      dialog.messageDialog({ message: "m", darwin: { icon: 7 as unknown as string } })
+    ).rejects.toMatchObject({
+      code: DIALOG_ERROR_CODES.invalidOptions,
+      details: { kind: "options", field: "darwin.icon" },
+    });
+    await expect(
+      dialog.messageDialog({ message: "m", darwin: { icon: "" } })
+    ).rejects.toMatchObject({
+      code: DIALOG_ERROR_CODES.invalidOptions,
+      details: { kind: "options", field: "darwin.icon" },
+    });
+    expect(transport.frames).toHaveLength(2); // load-ext + the one valid command only
+  });
+
   it("rejects unknown fields anywhere (beep lives in @opentray/ext-sound, not here)", async () => {
     const transport = new ScriptedTransport();
     const dialog = attachTestDialog("darwin", transport);

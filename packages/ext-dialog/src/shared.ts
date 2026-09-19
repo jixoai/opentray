@@ -29,9 +29,13 @@ export interface FilePickFilter {
   extensions: readonly string[];
 }
 
-/** v1 is intentionally empty (design reference section 2.1): suppression is already common; sheet anchoring and accessory views are gated on future laws. The empty namespace stays expressible (`darwin: {}`). */
+/** `darwin` namespace for `messageDialog`. `icon` (v1.31+): file path whose
+ *  image becomes the dialog icon — replaces the default app-icon slot and, on
+ *  the osascript bridge, the severity badge (`display dialog`'s single
+ *  `with icon` is either the severity constant or a file). Any system
+ *  `.icns` path works for non-severity system icons. */
 export interface DarwinMessageDialogNamespace {
-  // Intentionally empty in v1.
+  icon?: string;
 }
 
 export interface Win32MessageDialogExpander {
@@ -696,10 +700,20 @@ export const validateMessageDialogOptions = (
     if (platform === "darwin") {
       const darwinUnknown = firstUnknownField(
         namespace as Record<string, unknown>,
-        []
+        ["icon"]
       );
       if (darwinUnknown !== undefined) {
-        return invalidOptions("unknown field (the v1 darwin message namespace is empty)", `darwin.${darwinUnknown}`);
+        return invalidOptions("unknown field", `darwin.${darwinUnknown}`);
+      }
+      const darwinNamespace = namespace as Record<string, unknown>;
+      if (
+        darwinNamespace.icon !== undefined &&
+        typeof darwinNamespace.icon !== "string"
+      ) {
+        return invalidOptions("must be a string when present", "darwin.icon");
+      }
+      if (darwinNamespace.icon === "") {
+        return invalidOptions("must be a non-empty file path", "darwin.icon");
       }
     } else {
       const win32Issue = validateWin32MessageNamespace(

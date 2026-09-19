@@ -93,12 +93,22 @@ The capability is session-scoped (`tray.extend` family) and exposes:
   host — `display dialog` for message dialogs, `choose file`/`choose folder`/
   `choose file name` for the pickers — with these documented degradations: `detail` folds
   into the message text, `suppressionLabel` is not expressible (`suppressed` resolves
-  `false`), filter names drop (the extension union still applies), and bridge dialogs carry
-  the osascript host icon. More than three buttons and mixed file+directory selection reject
-  typed (`dialog_presentation_failed` with `reason: "bridge-buttons-limit"` /
+  `false`), filter names drop (the extension union still applies), and the dialog's
+  app-icon slot attributes to the osascript host (severity badges still apply:
+  informational shows no badge — native behavior — while warning/error badge exactly like
+  in-process alerts). The bridge title is the carrier display name, matching the
+  in-process NSAlert default. More than three buttons and mixed file+directory selection
+  reject typed (`dialog_presentation_failed` with `reason: "bridge-buttons-limit"` /
   `"bridge-mixed-selection-unsupported"`). A Developer-ID-signed carrier restores the full
-  in-process AppKit experience; every result contract (button index, cancel `null`) is
-  identical on both paths.
+  in-process AppKit experience (its app-icon slot then shows the consumer's own icon);
+  every result contract (button index, cancel `null`) is identical on both paths.
+- macOS custom dialog icon (`darwin.icon`, file path): any image the platform can
+  load — a custom `.png`/`.icns` or a system icon file — replaces the default
+  app-icon slot. On the bridge it also replaces the severity badge (`display
+  dialog`'s single `with icon` is either the severity constant or a file); an
+  unreadable path rejects typed (`reason: "icon-unreadable"`) before any dialog
+  is shown. A properly signed carrier projects the same option through
+  `NSAlert.setIcon`.
 - Windows: TaskDialog with `commandLink` buttons, `buttonHints`, `footer`, and `expander` in
   the `win32` namespace. Without common-controls v6 the runtime degrades to `MessageBoxW`:
   at most three buttons map to fixed platform sets, custom button labels collapse, and

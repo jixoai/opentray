@@ -27,7 +27,7 @@
 //! objc2-app-kit binding (no raw `msg_send!`).
 
 use objc2::rc::Retained;
-use objc2::{ClassType, MainThreadMarker};
+use objc2::{AnyThread, ClassType, MainThreadMarker};
 use objc2_app_kit::NSModalSession;
 use objc2_app_kit::{
     NSAlert, NSAlertStyle, NSApplication, NSModalResponseContinue, NSModalResponseOK,
@@ -482,6 +482,19 @@ fn build_alert(options: &MessageDialogOptions, mtm: MainThreadMarker) -> Retaine
         alert.setShowsSuppressionButton(true);
         if let Some(button) = alert.suppressionButton() {
             button.setTitle(&NSString::from_str(label));
+        }
+    }
+    // `darwin.icon` (in-process projection): a readable image file replaces
+    // the alert icon; an unreadable path keeps the default icon (the bridge
+    // is the typed-rejection authority — see compose_display_dialog).
+    if let Some(icon_path) = options.darwin.icon.as_ref().filter(|path| !path.is_empty()) {
+        let file = NSString::from_str(icon_path);
+        if let Some(image) =
+            objc2_app_kit::NSImage::initWithContentsOfFile(objc2_app_kit::NSImage::alloc(), &file)
+        {
+            // SAFETY: the alert is a live main-thread instance owned by
+            // this call; setting its icon is an ordinary AppKit mutation.
+            unsafe { alert.setIcon(Some(&image)) };
         }
     }
     alert

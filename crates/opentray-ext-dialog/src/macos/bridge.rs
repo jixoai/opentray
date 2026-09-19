@@ -192,6 +192,7 @@ pub(crate) fn compose_display_dialog(
         Some(detail) => format!("{}\n\n{}", options.message, detail),
         None => options.message.clone(),
     };
+    let mut argv_push_later: Option<String> = None;
     let default_index = options.default_id.unwrap_or(0).min(buttons.len() - 1);
     let cancel_index = options
         .cancel_id
@@ -200,24 +201,47 @@ pub(crate) fn compose_display_dialog(
     let default_pos = 2 + buttons.len();
     let cancel_pos = default_pos + 1;
     let title_pos = cancel_pos + 1;
+    // `display dialog`'s single `with icon` parameter is either the severity
+    // constant or a file (`POSIX file`); a custom icon therefore replaces
+    // the severity badge (documented). The path is pre-validated so a bad
+    // path rejects typed before any dialog is shown.
+    let icon_clause = if let Some(path) = options
+        .darwin
+        .icon
+        .as_ref()
+        .filter(|path| !path.is_empty())
+    {
+        if std::fs::metadata(path).is_err() {
+            return Err(bridge_rejection(
+                "icon-unreadable",
+                format!("darwin.icon file is not readable: {path}"),
+            ));
+        }
+        argv_push_later = Some(path.clone());
+        format!("with icon (POSIX file (item {} of argv))", title_pos + 1)
+    } else {
+        format!("with icon {}", icon_word(options.severity))
+    };
     let button_refs: Vec<String> = (0..buttons.len()).map(|i| format!("item {} of argv", 2 + i)).collect();
     let statement = format!(
         "on run argv\n\
          try\n\
-         display dialog (item 1 of argv) buttons {{{list}}} default button (item {default_pos} of argv as integer) cancel button (item {cancel_pos} of argv as integer) with icon {icon} with title (item {title_pos} of argv)\n\
+         display dialog (item 1 of argv) buttons {{{list}}} default button (item {default_pos} of argv as integer) cancel button (item {cancel_pos} of argv as integer) {icon_clause} with title (item {title_pos} of argv)\n\
          return \"button:\" & (button returned of result)\n\
          on error number -128\n\
          return \"cancel\"\n\
          end try\n\
          end run",
         list = button_refs.join(", "),
-        icon = icon_word(options.severity),
     );
     let mut argv = vec![display_text];
     argv.extend(buttons);
     argv.push((default_index + 1).to_string());
     argv.push((cancel_index + 1).to_string());
     argv.push(app_display_name());
+    if let Some(path) = argv_push_later {
+        argv.push(path);
+    }
     Ok((statement, argv))
 }
 
@@ -630,6 +654,26 @@ mod tests {
         );
         assert!(parse_bridge_output("button:Nope\n", &buttons).is_err());
         assert!(parse_bridge_output("garbage\n", &[]).is_err());
+    }
+
+    #[test]
+    fn display_dialog_custom_icon_swaps_the_icon_clause() {
+        // A system-shipped icns verified present on macOS 26 (CoreTypes
+        // itself ships no bare .icns on this install).
+        const SYSTEM_ICNS: &str = "/System/Library/Image Capture/Support/Icons/module.icns";
+        let mut options = message_options(&["OK"]);
+        options.darwin.icon = Some(SYSTEM_ICNS.to_string());
+        let (statement, argv) = compose_display_dialog(&options).unwrap();
+        assert!(statement.contains("with icon (POSIX file (item 6 of argv)) with title (item 5 of argv)"));
+        assert_eq!(argv.len(), 6);
+        assert_eq!(argv[5], SYSTEM_ICNS);
+        // Unreadable path rejects typed before any spawn.
+        options.darwin.icon = Some("/nonexistent/icon.png".into());
+        let error = compose_display_dialog(&options).unwrap_err();
+        assert_eq!(
+            error.details.as_ref().and_then(|d| d.get("reason")),
+            Some(&serde_json::json!("icon-unreadable"))
+        );
     }
 
     #[test]

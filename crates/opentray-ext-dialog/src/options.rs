@@ -50,13 +50,15 @@ pub(crate) struct DialogFileFilter {
     pub extensions: Vec<String>,
 }
 
-/// `options.darwin` for `messageDialog`: v1 keeps the namespace empty
-/// (suppression is already a common capability); the object stays
-/// expressible so later fields need no wire break.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// `options.darwin` for `messageDialog`: `icon` is a file path whose image
+/// becomes the dialog icon (replaces the default app-icon slot and, on the
+/// osascript bridge, the severity badge — `display dialog`'s single `with
+/// icon` parameter is either the severity constant or a file).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DarwinMessageNamespace {
-    // v1: intentionally empty (design section 2.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 /// `options.darwin` for `pickFile` (design section 2.1 full table).
