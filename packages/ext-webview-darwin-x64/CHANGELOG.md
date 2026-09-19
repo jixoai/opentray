@@ -1,5 +1,7 @@
 # @opentray/ext-webview-darwin-x64
 
+## 0.33.1
+
 ## 0.33.0
 
 ## 0.32.0
