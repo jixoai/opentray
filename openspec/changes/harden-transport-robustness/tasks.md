@@ -35,17 +35,25 @@
 
 ## 4. Death detection + state surface（W2 / W6 Tier1 — Phase C）
 
-- [ ] 4.1 客户端心跳：既有 `ClientFrame::Health` round-trip，30s 空闲间隔 / 3s 探测 deadline / 3 连续失败判死（皆可覆盖）；socket close/error 立即判死。
-- [ ] 4.2 判死走既有单飞行 `markDead` 路径（in-flight 立即拒绝、事件停投）；`transportStateChange`（healthy|recovering|abandoned）边沿触发事件面。
-- [ ] 4.3 测试：半开夹具（broker 活着但不答）在判死窗口内判死 + in-flight 拒绝；心跳参数覆盖生效。
+- [x] 4.1 客户端心跳：既有 `ClientFrame::Health` round-trip，30s 空闲间隔 / 3s 探测 deadline / 3 连续失败判死（皆可覆盖）；socket close/error 立即判死。
+  - 证据：18bb4e1e transport-supervision.ts；空闲门控（忙碌运输零探针）；非探针 expiry 计入失败连续计数但单次绝不判死（W1 律）。
+- [x] 4.2 判死走既有单飞行 `markDead` 路径（in-flight 立即拒绝、事件停投）；`transportStateChange`（healthy|recovering|abandoned）边沿触发事件面。
+  - 证据：18bb4e1e；每代 onConnectionDead 转发保持 D3 消费者语义；判死后对半开连接有界 close（2s 降级）拒绝 in-flight。
+- [x] 4.3 测试：半开夹具（broker 活着但不答）在判死窗口内判死 + in-flight 拒绝；心跳参数覆盖生效。
+  - 证据：transport-supervision.test.ts 18 例（wedge 判死/忙碌零探针+静默复探/socket close 即判/expiry 计数/参数短化）。
 
 ## 5. Recovery（W4 / W5 / W6 Tier2 — Phase D）
 
-- [ ] 5.1 声明式 journal：核心 tray/app 变更（createTray 选项、last-set menu/icon/tooltip、app name/icon）、extension mounts（精确 resolved artifact + identity + mountId）、ext-webview 窗口（options、last-set style、事件订阅集）。
-- [ ] 5.2 重生序列：cooldown backoff → 既有 spawn 机械（identity 门）→ 重连握手 → 重放 journal → 查询原生状态 → 全量状态快照再发射 → 恢复。进程内预算 3 次/10 分钟（默认，可覆盖）。
-- [ ] 5.3 预算耗尽：停止重生；全部 handle 方法 fail-fast typed `transport_abandoned` 族拒绝；终态 `abandoned` 事件；应用保持无头运行。
-- [ ] 5.4 Tier 2 `recovery.restartApp`：提供即取代进程内重建，supervisor 交还后一次性回调。
-- [ ] 5.5 ext-webview facade：drain/订阅生命周期跟随 supervision 状态；重建后从原生查询合成全量快照（可见性/焦点/几何）；页面 reload 契约文档化。
+- [x] 5.1 声明式 journal：核心 tray/app 变更（createTray 选项、last-set menu/icon/tooltip、app name/icon）、extension mounts（精确 resolved artifact + identity + mountId）、ext-webview 窗口（options、last-set style、事件订阅集）。
+  - 证据：18bb4e1e 帧嗅探零 API 变更；防御性 structuredClone；LWW 原位替换；destroy-tray 成功驱逐（防复活）；appId 以新世代 default-app 应答为权威重写。
+- [x] 5.2 重生序列：cooldown backoff（1s ×2 封顶 30s）→ 既有 connectLocalBroker（identity 门与锁回收原样重apply）→ 重连握手 → 重放 journal（bootstrap 预算类、fresh requestId、原 trayId 注入）→ facade rebuild 回调（注册序，携 fresh sessionId）→ 全量状态快照再发射 → healthy。进程内预算 3 次/10 分钟（默认，可覆盖）。
+  - 证据：18bb4e1e；adoptGeneration 全序列成功才提交世代（恢复中消费调用对死代 fail-fast）。
+- [x] 5.3 预算耗尽：停止重生；全部 handle 方法 fail-fast typed `TransportAbandonedError`（code `transport_abandoned`，details `{recoveries, windowMs}`）；终态 `abandoned` 事件；应用保持无头运行。
+  - 证据：预算耗尽测试断言无循环 + fail-fast + abandoned。
+- [x] 5.4 Tier 2 `recovery.restartApp`：提供即取代进程内重建，有界 teardown 后回调恰好一次（异常不重入）→ 终态。
+  - 证据：Tier 2 测试（恰好一次、零重连）。
+- [x] 5.5 ext-webview facade：drain/订阅生命周期跟随 supervision 状态；重建后从原生查询合成全量快照（可见性/几何）；页面 reload 契约文档化。
+  - 证据：18bb4e1e；rebuild = dispose 死态 orchestration → 重建 → applyShow(fresh sessionId) → 重放合并 style → isVisible+getBounds 合成 visibleChange/moved/resized；focus/style 无查询动词保持 edge-only（design-reference 裁决 5）；82/82。
 
 ## 6. Acceptance + docs（W8 / W9 — Phase E）
 

@@ -4,6 +4,37 @@ Working design for W2/W4/W5/W6. Phase A (client deadlines, W1/W3) and Phase B
 (broker write discipline, W7) land first; this document freezes the seams
 they must have left open and the architecture built on them.
 
+## Implementation rulings (recorded at Phase C/D landing, commit 18bb4e1e)
+
+Deviations from the working design below, adjudicated during implementation:
+
+1. **Rebuild callback signature** is `(context: { generation, sessionId })`:
+   replayed show frames and orchestration owner tuples need the fresh
+   generation's session id, not just a generation number.
+2. **Caller-intent marking** rides the Phase A frozen teardown budget class
+   (`deadlineMs === TEARDOWN_CALL_DEADLINE_MS`) instead of requiring destroy
+   paths to call `shutdown()` first — otherwise closing first would swallow
+   the destroy-tray frame. `shutdown()` still marks synchronously.
+3. **`destroy-tray` success evicts the tray's journal entries** — a destroyed
+   tray must not resurrect on recovery (journal mirrors declarative state).
+   `load-ext` entries survive (mounts are app-scoped, not tray-scoped).
+4. **`resolve-default-app` is journaled** and replayed; the new generation's
+   default-app response is the appId authority and rewrites later frames.
+5. **Snapshot re-emit covers the queryable families** (`visibleChange`,
+   `moved`, `resized`); `focus` and style families have no query verb on the
+   frozen v1 command surface and stay edge-only (documented, not silent).
+6. **Budget debits per attempt** (success also consumes) — the literal
+   "3 respawns per window" reading.
+7. **Tier 2 state sequence** is `healthy → recovering → abandoned` (death
+   edge enters recovering; terminal abandoned after the callback).
+
+Known recovery-scope boundary: the journal covers the declarative surface
+(createTray options, last-set mutations, mounts, declared windows/styles).
+Incremental post-bootstrap orchestration changes (runtime
+createWebview/setLayout/channel mutations beyond the declared options) are
+not retained yet — a later retention layer can extend the journal without
+contract change.
+
 ## Placement
 
 A new supervision layer in `packages/cli` sits between `connectLocalBroker`
