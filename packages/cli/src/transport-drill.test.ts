@@ -101,6 +101,8 @@ describe("transport robustness drill (W8 permanent gate)", () => {
   let previousBrokerBin: string | undefined;
   let hadBrokerBin = false;
   let brokerPid: number | undefined;
+  /** pid file of the current test's drill home, captured before createTray. */
+  let drillPidFile: string | undefined;
 
   beforeAll(async () => {
     // AGENTS socket-path law: the complete macOS/Linux Unix socket path must
@@ -129,7 +131,19 @@ describe("transport robustness drill (W8 permanent gate)", () => {
 
   afterEach(async () => {
     // Scoped to THIS drill's temp home only: never touch any other broker
-    // (a user's real app keeps running unaffected).
+    // (a user's real app keeps running unaffected). The pid file is re-read
+    // best-effort so a failure between broker spawn and the test's own pid
+    // capture cannot leak the spawned process.
+    if (drillPidFile !== undefined) {
+      const leaked = await readPidFile(drillPidFile);
+      if (leaked !== undefined && isPidAlive(leaked)) {
+        try {
+          process.kill(leaked, "SIGKILL");
+        } catch {
+          // Already gone.
+        }
+      }
+    }
     if (brokerPid !== undefined && isPidAlive(brokerPid)) {
       try {
         process.kill(brokerPid, "SIGKILL");
@@ -138,6 +152,7 @@ describe("transport robustness drill (W8 permanent gate)", () => {
       }
     }
     brokerPid = undefined;
+    drillPidFile = undefined;
     if (homeDir !== undefined) {
       await rm(homeDir, { recursive: true, force: true }).catch(() => {});
     }
@@ -163,6 +178,9 @@ describe("transport robustness drill (W8 permanent gate)", () => {
         appId,
         appName,
       });
+      // Captured before createTray so afterEach can find and kill the
+      // spawned broker even when a later step in this test throws.
+      drillPidFile = paths.pidFile;
 
       // THE consumer, in full (issue #11 acceptance criterion 1):
       const tray = await createTray(

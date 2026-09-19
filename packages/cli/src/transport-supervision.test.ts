@@ -1143,3 +1143,178 @@ const brokerIdentity = (seed: string): BrokerArtifactIdentity => ({
   executableHash: seed.repeat(64),
   buildIdentity: `sha256:${seed.repeat(16)}`,
 });
+
+describe("transport supervision review-round fixes (codex P1s)", () => {
+  it("routes rebuild-callback requests to the adoption candidate, not the dead generation", async () => {
+    const { supervisor, generations } = createHarness();
+    await supervisor.connect();
+    let rebuildServedBy: number | undefined;
+    supervisor.registerTransportRebuild(async () => {
+      // A facade rebuild issues its re-creation commands through this
+      // supervisor; during adoption they must reach the candidate.
+      const response = await supervisor.request({
+        type: "get-tray-bounds",
+        requestId: "rebuild-probe",
+        appId: "app-default",
+        trayId: "tray-rebuild",
+      });
+      rebuildServedBy = generations.findIndex((generation) =>
+        generation.frames.some(
+          (recorded) => recorded.frame.requestId === "rebuild-probe",
+        ),
+      );
+      expect(response.type).toBe("tray-bounds");
+    });
+
+    at(generations, 0).kill();
+    await eventually(
+      () => supervisor.transportState === "healthy" && generations.length === 2,
+    );
+
+    expect(rebuildServedBy).toBe(1);
+    // The dead generation never saw the rebuild probe.
+    expect(
+      at(generations, 0).frames.some(
+        (recorded) => recorded.frame.requestId === "rebuild-probe",
+      ),
+    ).toBe(false);
+  });
+
+  it("aborts an in-flight reconnect when shutdown races it (no resurrection)", async () => {
+    const generations: FakeGeneration[] = [];
+    let releaseSecondConnect: (() => void) | undefined;
+    const secondConnect = new Promise<void>((resolve) => {
+      releaseSecondConnect = resolve;
+    });
+    const factory = vi.fn(async (): Promise<LocalBrokerClient> => {
+      const ordinal = generations.length + 1;
+      const generation = new FakeGeneration(ordinal);
+      generations.push(generation);
+      if (ordinal === 2) {
+        await secondConnect;
+      }
+      return generation;
+    });
+    const supervisor = createTransportSupervisor({
+      connect: () => factory(),
+      ...SHORT_HEARTBEAT,
+      recovery: FAST_RECOVERY,
+    });
+    supervisorTeardown.push(() => supervisor.shutdown());
+    await supervisor.connect();
+    const states: string[] = [];
+    supervisor.onTransportStateChange((state) => states.push(state));
+
+    at(generations, 0).kill();
+    await eventually(() => supervisor.transportState === "recovering");
+    // Wait until the reconnect is actually in flight (the factory entered
+    // and parked on the deferred) so teardown lands inside the connect
+    // window, not before it.
+    await eventually(() => factory.mock.calls.length === 2 && generations.length === 2);
+    await supervisor.shutdown();
+    releaseSecondConnect?.();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(supervisor.transportState).not.toBe("healthy");
+    expect(states).toEqual(["recovering"]);
+    // The raced candidate was closed, not adopted.
+    expect(at(generations, 1).closeCount).toBeGreaterThanOrEqual(1);
+    await expect(
+      supervisor.request({
+        type: "get-tray-bounds",
+        requestId: "post-shutdown",
+        appId: "app-default",
+        trayId: "t",
+      }),
+    ).rejects.toThrow(BROKER_CONNECTION_CLOSED_MESSAGE);
+  });
+
+  it("aborts an adoption when shutdown lands between reconnect and commit", async () => {
+    const { supervisor, generations } = createHarness();
+    await supervisor.connect();
+    let candidateBeforeShutdown: FakeGeneration | undefined;
+    supervisor.registerTransportRebuild(async () => {
+      candidateBeforeShutdown = at(generations, 1);
+      // Teardown lands mid-adoption: the candidate is fully wired but not
+      // yet committed.
+      await supervisor.shutdown();
+    });
+    const states: string[] = [];
+    supervisor.onTransportStateChange((state) => states.push(state));
+
+    at(generations, 0).kill();
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(candidateBeforeShutdown).toBeDefined();
+    expect(supervisor.transportState).not.toBe("healthy");
+    expect(states).toEqual(["recovering"]);
+    expect(at(generations, 1).closeCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps at most one heartbeat probe outstanding when interval < probe deadline", async () => {
+    const { supervisor, generations } = createHarness(
+      {
+        heartbeatIntervalMs: 5,
+        probeDeadlineMs: 120,
+        heartbeatFailureThreshold: 3,
+      },
+      { configureGeneration: (generation) => {
+        generation.probeBehavior = "wedge";
+      } },
+    );
+    await supervisor.connect();
+    // With a wedged 120 ms probe and a 5 ms interval, an unguarded loop
+    // would have started ~30 probes by now; single-flight starts one.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 150);
+    });
+    const healthProbes = at(generations, 0).frames.filter(
+      (recorded) => recorded.frame.type === "health",
+    );
+    expect(healthProbes.length).toBeLessThanOrEqual(2);
+    expect(supervisor.transportState).toBe("healthy");
+
+    // Death is still declared once the threshold of settled failures
+    // accumulates — one probe at a time.
+    await eventually(() => supervisor.transportState === "recovering");
+  });
+
+  it("bounds a hanging reconnect attempt and closes its late-resolving connection", async () => {
+    const firstGeneration = new FakeGeneration(1);
+    let lateGeneration: FakeGeneration | undefined;
+    let releaseLate: (() => void) | undefined;
+    const lateConnect = new Promise<void>((resolve) => {
+      releaseLate = resolve;
+    });
+    const factory = vi.fn(async (): Promise<LocalBrokerClient> => {
+      if (factory.mock.calls.length === 1) {
+        return firstGeneration;
+      }
+      await lateConnect;
+      lateGeneration = new FakeGeneration(factory.mock.calls.length);
+      return lateGeneration;
+    });
+    const supervisor = createTransportSupervisor({
+      connect: () => factory(),
+      ...SHORT_HEARTBEAT,
+      recovery: { ...FAST_RECOVERY, maxRestarts: 1, connectTimeoutMs: 40 },
+    });
+    supervisorTeardown.push(() => supervisor.shutdown());
+    await supervisor.connect();
+
+    firstGeneration.kill();
+    await eventually(() => supervisor.transportState === "abandoned");
+    // The single allowed attempt timed out against the hanging factory.
+    expect(factory.mock.calls.length).toBe(2);
+
+    // The connection that resolves after its budget is closed on arrival —
+    // no orphan generation keeps a broker session alive.
+    releaseLate?.();
+    await eventually(() => lateGeneration !== undefined);
+    await eventually(() => (lateGeneration as FakeGeneration).closeCount >= 1);
+  });
+});

@@ -165,10 +165,11 @@ export interface TrayHandle {
   setTooltip(tooltip: Tooltip): Promise<void>;
   setIcon(icon: Icon): Promise<void>;
   loadExtension(options: ExtensionLoadOptions): Promise<void>;
-  commandExtension(ext: string, data: unknown): Promise<void>;
+  commandExtension(ext: string, data: unknown, callOptions?: TransportRequestOptions): Promise<void>;
   requestExtension<TValue = unknown>(
     ext: string,
-    data: unknown
+    data: unknown,
+    callOptions?: TransportRequestOptions
   ): Promise<ExtensionRequestResult<TValue>>;
   extend<TCapability extends object, TOptions = undefined>(
     extension: TrayExtension<TCapability, TOptions>,
@@ -273,8 +274,8 @@ export interface TrayExtensionContext {
   readonly artifact: NativeExtensionArtifact;
   readonly mountId: string;
   ensureLoaded(): Promise<void>;
-  command(data: unknown): Promise<void>;
-  request<TValue = unknown>(data: unknown): Promise<ExtensionRequestResult<TValue>>;
+  command(data: unknown, callOptions?: TransportRequestOptions): Promise<void>;
+  request<TValue = unknown>(data: unknown, callOptions?: TransportRequestOptions): Promise<ExtensionRequestResult<TValue>>;
 }
 
 export interface TrayExtension<
@@ -454,22 +455,26 @@ export function createTrayHandle(
       });
       expectResponse(response, requestId, "ack");
     },
-    async commandExtension(ext: string, data: unknown): Promise<void> {
-      await this.requestExtension(ext, data);
+    async commandExtension(ext: string, data: unknown, callOptions?: TransportRequestOptions): Promise<void> {
+      await this.requestExtension(ext, data, callOptions);
     },
     async requestExtension<TValue = unknown>(
       ext: string,
-      data: unknown
+      data: unknown,
+      callOptions?: TransportRequestOptions
     ): Promise<ExtensionRequestResult<TValue>> {
       const requestId = nextRequestId();
-      const response = await transport.request({
-        type: "ext-command",
-        requestId,
-        appId,
-        trayId,
-        ext,
-        data,
-      });
+      const response = await transport.request(
+        {
+          type: "ext-command",
+          requestId,
+          appId,
+          trayId,
+          ext,
+          data,
+        },
+        callOptions,
+      );
       if (response.type === "ack") {
         expectResponse(response, requestId, "ack");
         return { kind: "immediate", events: [] };
@@ -785,15 +790,16 @@ const createTrayExtensionContext = <TCapability extends object, TOptions>(
     artifact,
     mountId,
     ensureLoaded,
-    async command(data: unknown): Promise<void> {
+    async command(data: unknown, callOptions?: TransportRequestOptions): Promise<void> {
       await ensureLoaded();
-      await tray.commandExtension(mountId, data);
+      await tray.commandExtension(mountId, data, callOptions);
     },
     async request<TValue = unknown>(
-      data: unknown
+      data: unknown,
+      callOptions?: TransportRequestOptions
     ): Promise<ExtensionRequestResult<TValue>> {
       await ensureLoaded();
-      return tray.requestExtension<TValue>(mountId, data);
+      return tray.requestExtension<TValue>(mountId, data, callOptions);
     },
   };
 };

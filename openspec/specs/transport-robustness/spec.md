@@ -1,7 +1,16 @@
 # transport-robustness Specification
 
 ## Purpose
-TBD - created by archiving change harden-transport-robustness. Update Purpose after archive.
+
+Guarantee that every OpenTray transport failure is bounded, typed, and —
+when uninvited — automatically recoverable with zero consumer code: per-call
+deadline budgets settle every request, broker death (socket close, error, or
+a heartbeat-declared half-open) surfaces as a bounded event, in-process
+recovery replays the declarative session state against a respawned broker
+and re-emits a full state snapshot, a bounded restart budget degrades to
+fail-fast calls plus the terminal `abandoned` state while the app survives
+headless, and the broker's own socket writes never block the native owner
+loop and never swallow write failures.
 ## Requirements
 ### Requirement: Transport round-trips SHALL settle within a bounded deadline
 
@@ -219,4 +228,3 @@ per repository law.
 - **WHEN** the drill executes
 - **THEN** both the recovery leg and the exhaustion leg pass without
   consumer recovery code in the fixture.
-

@@ -127,6 +127,13 @@ impl OutboundWriter {
         true
     }
 
+    /// True once this session already escalated a disconnect: the reader's
+    /// own EOF path checks it so one session death produces exactly one
+    /// `Disconnected` transport event even when the writer escalated first.
+    pub fn has_escalated(&self) -> bool {
+        self.escalated.load(Ordering::SeqCst)
+    }
+
     /// Escalate to the session-disconnect path — the exact
     /// `TransportEvent::Disconnected` the reader thread emits — so session
     /// cleanup (event-hub/deferred revocation, extension-host close, purge,
@@ -774,7 +781,13 @@ fn spawn_reader(id: u64, stream: UnixStream, writer: Writer, send: EventSender) 
                 }
             }
         }
-        send(TransportEvent::Disconnected { id });
+        // One session death produces exactly one Disconnected event: skip
+        // the reader's own EOF notification when the writer already
+        // escalated this session (owner-loop removal is idempotent either
+        // way, but terminal observers should not see doubles).
+        if !writer.has_escalated() {
+            send(TransportEvent::Disconnected { id });
+        }
     });
 }
 
@@ -947,6 +960,46 @@ mod tests {
                 TransportEvent::Disconnected { id: 41 }
             )),
             "a write failure must escalate Disconnected through the transport event path"
+        );
+    }
+
+    #[test]
+    fn escalated_session_emits_exactly_one_disconnected_even_after_reader_eof() {
+        let sink = collector();
+        let (broker_end, client_end) = UnixStream::pair().expect("socketpair");
+        // Production shape: one dup of the accepted socket per role.
+        let writer_stream = broker_end.try_clone().expect("writer stream clone");
+        let (writer, outbound) = OutboundWriter::new(44, collector_events(&sink), &broker_end)
+            .expect("outbound writer");
+        spawn_reader(44, broker_end, writer.clone(), collector_events(&sink));
+        spawn_writer(writer_stream, outbound, writer.clone());
+        let _client_held = client_end;
+        // Escalate first through the producer path: saturate the peer's
+        // socket buffer and the queue bound with 8 KiB frames (small frames
+        // fit entirely inside the macOS socketpair buffer and never park
+        // the writer). Escalation also shuts the socket down, so the reader
+        // observes EOF right after — its own duplicate notification must be
+        // suppressed by the escalated flag.
+        let payload = "x".repeat(8192);
+        let mut escalated = false;
+        for sequence in 0..(OUTBOUND_QUEUE_CAPACITY * 3) {
+            writer.enqueue(error_frame(sequence, &payload));
+            if has_disconnected(&sink, 44) {
+                escalated = true;
+                break;
+            }
+        }
+        assert!(escalated, "saturation must escalate Disconnected");
+        thread::sleep(Duration::from_millis(200));
+        let disconnected = sink
+            .lock()
+            .expect("collector lock")
+            .iter()
+            .filter(|event| matches!(event, TransportEvent::Disconnected { id: 44 }))
+            .count();
+        assert_eq!(
+            disconnected, 1,
+            "one session death produces exactly one Disconnected event"
         );
     }
 

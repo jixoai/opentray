@@ -50,7 +50,7 @@ shape honors each clause:
 Issue #11 global acceptance, item by item:
 
 1. Zero-code-change consumer survives `kill -9` — proven by the drill
-   (macOS, real process). 
+   (macOS, real process).
 2. No public handle method can hang forever — transport-level deadlines
    cover every request path; teardown wall-clocked; deferred completions are
    liveness-bounded (death detection bounds the bad case).

@@ -54,15 +54,17 @@ export const DEFAULT_HEARTBEAT_FAILURE_THRESHOLD = 3;
 
 /**
  * Default recovery budget (W5): 3 respawn attempts per 10-minute window,
- * 1 s initial cooldown with exponential backoff (factor 2, capped at 30 s).
- * In-memory per supervisor — a fresh `createTray` is a fresh budget,
- * matching "a manual process restart resets the budget".
+ * 1 s initial cooldown with exponential backoff (factor 2, capped at 30 s),
+ * and a 10 s budget per reconnect attempt so a hanging connect can never
+ * park the recovery loop. In-memory per supervisor — a fresh `createTray` is
+ * a fresh budget, matching "a manual process restart resets the budget".
  */
 export const DEFAULT_RECOVERY_MAX_RESTARTS = 3;
 export const DEFAULT_RECOVERY_WINDOW_MS = 600_000;
 export const DEFAULT_RECOVERY_COOLDOWN_MS = 1_000;
 export const DEFAULT_RECOVERY_BACKOFF_FACTOR = 2;
 export const DEFAULT_RECOVERY_BACKOFF_CAP_MS = 30_000;
+export const DEFAULT_RECOVERY_CONNECT_TIMEOUT_MS = 10_000;
 
 /**
  * Typed fail-fast rejection for every call issued after supervision reached
@@ -106,6 +108,12 @@ export interface TransportRecoveryOptions {
   backoffFactor?: number;
   /** Backoff ceiling in milliseconds (default 30_000). */
   backoffCapMs?: number;
+  /**
+   * Budget for one reconnect attempt (default 10 s). A connect factory that
+   * never settles counts as a failed attempt instead of parking the
+   * recovery loop; its late-resolving connection is closed on arrival.
+   */
+  connectTimeoutMs?: number;
   /**
    * Tier 2 hand-over (default: absent). When provided, an uninvited death
    * performs a bounded teardown, invokes this callback exactly once, and goes
@@ -232,6 +240,7 @@ export class SupervisedLocalBrokerConnection {
   private readonly cooldownMs: number;
   private readonly backoffFactor: number;
   private readonly backoffCapMs: number;
+  private readonly connectTimeoutMs: number;
   private readonly restartApp: (() => void | Promise<void>) | undefined;
 
   private connection: LocalBrokerClient | undefined;
@@ -247,10 +256,18 @@ export class SupervisedLocalBrokerConnection {
   private unwireGeneration: () => void = noop;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private heartbeatOrdinal = 0;
+  private heartbeatInFlight = false;
   private consecutiveHeartbeatFailures = 0;
   private lastSettledAt = 0;
   private restartTimestamps: number[] = [];
   private callerInitiated = false;
+  /**
+   * Monotonic teardown epoch: `shutdown()` bumps it so an in-flight recovery
+   * attempt can detect that it raced caller-initiated teardown and abort
+   * instead of resurrecting a destroyed runtime (no candidate adoption, no
+   * `healthy` transition, no restarted heartbeat).
+   */
+  private teardownEpoch = 0;
   private shutdownPromise: Promise<void> | undefined;
 
   constructor(
@@ -268,6 +285,7 @@ export class SupervisedLocalBrokerConnection {
     this.cooldownMs = recovery.cooldownMs ?? DEFAULT_RECOVERY_COOLDOWN_MS;
     this.backoffFactor = recovery.backoffFactor ?? DEFAULT_RECOVERY_BACKOFF_FACTOR;
     this.backoffCapMs = recovery.backoffCapMs ?? DEFAULT_RECOVERY_BACKOFF_CAP_MS;
+    this.connectTimeoutMs = recovery.connectTimeoutMs ?? DEFAULT_RECOVERY_CONNECT_TIMEOUT_MS;
     this.restartApp = recovery.restartApp;
   }
 
@@ -406,11 +424,15 @@ export class SupervisedLocalBrokerConnection {
   /**
    * Graceful teardown channel (W4/W3): idempotent, marks the supervision
    * caller-initiated synchronously (so the close-driven death event can
-   * never trigger recovery), stops the heartbeat, then closes the current
-   * generation within its bounded graceful-close budget.
+   * never trigger recovery), bumps the teardown epoch (so an in-flight
+   * recovery attempt aborts instead of resurrecting the runtime), stops the
+   * heartbeat, then closes the current generation — including an
+   * adoption-in-progress candidate routed through `this.connection` —
+   * within its bounded graceful-close budget.
    */
   async shutdown(): Promise<void> {
     this.callerInitiated = true;
+    this.teardownEpoch += 1;
     this.shutdownPromise ??= (async () => {
       this.stopHeartbeat();
       this.unwireGeneration();
@@ -452,9 +474,17 @@ export class SupervisedLocalBrokerConnection {
    * proves its own liveness, so the probe budget is spent only on silence.
    * A probe failure of any rejection class (typed timeout, transport-lost,
    * broker error frame) counts; a successful settlement resets the streak.
+   * Single-flight with a generation token: at most one probe per generation
+   * is outstanding (a configured interval shorter than the probe deadline
+   * must not run concurrent probes whose completions double-count), and a
+   * probe that outlives its generation settles nothing.
    */
   private async heartbeatTick(): Promise<void> {
+    if (this.heartbeatInFlight) {
+      return;
+    }
     const connection = this.connection;
+    const probeGeneration = this.generation;
     if (
       connection === undefined ||
       this.state !== "healthy" ||
@@ -465,15 +495,21 @@ export class SupervisedLocalBrokerConnection {
     if (Date.now() - this.lastSettledAt < this.heartbeatIntervalMs) {
       return;
     }
+    this.heartbeatInFlight = true;
     const requestId = `supervisor-heartbeat-${this.generation}-${(this.heartbeatOrdinal += 1)}`;
     try {
       await connection.request(
         { type: "health", requestId },
         { deadlineMs: this.probeDeadlineMs },
       );
-      this.consecutiveHeartbeatFailures = 0;
-      this.noteSuccessfulSettlement();
+      if (this.generation === probeGeneration && this.state === "healthy") {
+        this.consecutiveHeartbeatFailures = 0;
+        this.noteSuccessfulSettlement();
+      }
     } catch (error) {
+      if (this.generation !== probeGeneration || this.state !== "healthy") {
+        return;
+      }
       this.consecutiveHeartbeatFailures += 1;
       if (this.consecutiveHeartbeatFailures < this.heartbeatFailureThreshold) {
         return;
@@ -489,6 +525,8 @@ export class SupervisedLocalBrokerConnection {
       // the real destroy path without a second death notification.
       this.handleGenerationDeath(death);
       void connection.close().catch(noopAsync);
+    } finally {
+      this.heartbeatInFlight = false;
     }
   }
 
@@ -623,7 +661,10 @@ export class SupervisedLocalBrokerConnection {
    * original connect options → journal replay → facade rebuilds → healthy.
    * Every attempt consumes budget up front; a failed attempt (connect,
    * replay, or rebuild — including artifact identity mismatches) retries
-   * inside the remaining budget until exhaustion abandons the runtime.
+   * inside the remaining budget until exhaustion abandons the runtime. Each
+   * reconnect attempt is bounded by the connect budget, and every step
+   * re-checks the teardown epoch so a shutdown racing the loop aborts it
+   * instead of resurrecting the runtime.
    */
   private async runRecovery(): Promise<void> {
     this.setState("recovering");
@@ -641,15 +682,66 @@ export class SupervisedLocalBrokerConnection {
       if (this.callerInitiated) {
         return;
       }
+      const attemptEpoch = this.teardownEpoch;
       try {
-        const candidate = await this.connectFactory();
-        await this.adoptGeneration(candidate);
+        const candidate = await this.connectWithBudget();
+        if (this.teardownEpoch !== attemptEpoch || this.callerInitiated) {
+          // Shutdown landed while the connect was in flight: the candidate
+          // belongs to nobody — close it and stay torn down.
+          await candidate.close().catch(noopAsync);
+          return;
+        }
+        await this.adoptGeneration(candidate, attemptEpoch);
+        if (this.teardownEpoch !== attemptEpoch || this.callerInitiated) {
+          return;
+        }
         this.setState("healthy");
         return;
       } catch {
         backoffOrdinal += 1;
       }
     }
+  }
+
+  /**
+   * One reconnect attempt under the connect budget. A factory that never
+   * settles counts as a failed attempt; a connection arriving after the
+   * budget expired is closed on arrival so no orphan generation leaks.
+   */
+  private async connectWithBudget(): Promise<LocalBrokerClient> {
+    let settled = false;
+    return new Promise<LocalBrokerClient>((resolve, reject) => {
+      const late = (candidate: LocalBrokerClient): void => {
+        void candidate.close().catch(noopAsync);
+      };
+      const timer = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        reject(new Error(`recovery connect exceeded ${this.connectTimeoutMs}ms`));
+      }, this.connectTimeoutMs);
+      timer.unref();
+      this.connectFactory().then(
+        (candidate) => {
+          if (settled) {
+            late(candidate);
+            return;
+          }
+          settled = true;
+          clearTimeout(timer);
+          resolve(candidate);
+        },
+        (error: unknown) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    });
   }
 
   private cooldownForBackoff(backoffOrdinal: number): number {
@@ -678,15 +770,22 @@ export class SupervisedLocalBrokerConnection {
 
   /**
    * Wires the candidate generation, replays the journal, and runs the
-   * facade rebuild callbacks. `this.connection` is committed only after the
-   * full sequence succeeds: consumer calls during recovery keep failing
-   * fast against the dead generation instead of racing a half-replayed
-   * broker. A failing candidate is unwired and closed (bounded) before the
-   * attempt is reported failed.
+   * facade rebuild callbacks. The candidate becomes `this.connection` for
+   * the adoption's duration — facade rebuild callbacks route their
+   * re-creation commands through this supervisor, so they must reach the
+   * candidate, not the dead generation (the rebuild-routing law). A failure
+   * rolls the candidate back out (unwired, closed) and restores the dead
+   * previous connection so consumer calls keep failing fast; a teardown
+   * racing the adoption aborts without resurrecting anything.
    */
-  private async adoptGeneration(candidate: LocalBrokerClient): Promise<void> {
+  private async adoptGeneration(
+    candidate: LocalBrokerClient,
+    attemptEpoch: number,
+  ): Promise<void> {
+    const previousConnection = this.connection;
     this.generation += 1;
     this.unwireGeneration = this.wireGeneration(candidate);
+    this.connection = candidate;
     try {
       await this.replayJournal(candidate);
       for (const rebuild of [...this.rebuildCallbacks]) {
@@ -695,15 +794,37 @@ export class SupervisedLocalBrokerConnection {
           sessionId: candidate.sessionId.length > 0 ? candidate.sessionId : undefined,
         });
       }
+      if (this.teardownEpoch !== attemptEpoch || this.callerInitiated) {
+        // Shutdown raced a fully replayed candidate: unwind it instead of
+        // resurrecting a torn-down runtime.
+        this.rollbackAdoption(candidate, previousConnection);
+        throw new Error("recovery aborted by caller-initiated teardown");
+      }
     } catch (error) {
-      this.unwireGeneration();
-      this.unwireGeneration = noop;
-      await candidate.close().catch(noopAsync);
+      this.rollbackAdoption(candidate, previousConnection);
       throw error;
     }
-    this.connection = candidate;
     this.consecutiveHeartbeatFailures = 0;
     this.noteSuccessfulSettlement();
+  }
+
+  /**
+   * Removes a failed (or torn-down) adoption candidate: stop its wiring,
+   * close it bounded, and restore the previous dead connection unless a
+   * caller-initiated shutdown already dissolved the runtime (shutdown's own
+   * close handled the candidate in that window; the restore must not undo
+   * the torn-down state).
+   */
+  private rollbackAdoption(
+    candidate: LocalBrokerClient,
+    previousConnection: LocalBrokerClient | undefined,
+  ): void {
+    this.unwireGeneration();
+    this.unwireGeneration = noop;
+    if (this.connection === candidate) {
+      this.connection = this.callerInitiated ? undefined : previousConnection;
+    }
+    void candidate.close().catch(noopAsync);
   }
 
   /**

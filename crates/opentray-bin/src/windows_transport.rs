@@ -103,6 +103,13 @@ impl OutboundWriter {
         true
     }
 
+    /// True once this session already escalated a disconnect: the pump's own
+    /// exit path checks it so one session death produces exactly one
+    /// `Disconnected` transport event even when the producer escalated first.
+    pub fn has_escalated(&self) -> bool {
+        self.escalated.load(Ordering::SeqCst)
+    }
+
     /// Escalate to the session-disconnect path — the same
     /// `TransportEvent::Disconnected` the pump emits on pipe errors — so
     /// session cleanup runs through its existing chain and the failure is
@@ -345,7 +352,7 @@ fn spawn_pipe_pump(
                 },
                 Ok(available) => {
                     if let Err(error) =
-                        read_available_frames(id, &mut stream, available, &mut inbound, &send)
+                        read_available_frames(id, &mut stream, available, &mut inbound, &send, &writer)
                     {
                         if !is_broken_pipe_error(&error) {
                             eprintln!("opentray client read error: {error}");
@@ -361,7 +368,13 @@ fn spawn_pipe_pump(
                 }
             }
         }
-        send(TransportEvent::Disconnected { id });
+        // One session death produces exactly one Disconnected event: skip
+        // the pump's own exit notification when the producer already
+        // escalated this session (owner-loop removal is idempotent either
+        // way, but terminal observers should not see doubles).
+        if !writer.has_escalated() {
+            send(TransportEvent::Disconnected { id });
+        }
     });
 }
 
@@ -406,6 +419,7 @@ fn read_available_frames(
     available: u32,
     inbound: &mut Vec<u8>,
     send: &EventSender,
+    writer: &Writer,
 ) -> std::io::Result<()> {
     let mut chunk = vec![0; available.min(65_536) as usize];
     let read = stream.read(&mut chunk)?;
@@ -428,15 +442,17 @@ fn read_available_frames(
         let line = match std::str::from_utf8(&line) {
             Ok(line) => line,
             Err(error) => {
-                write_frame_to_pipe(
-                    stream,
-                    &ServerFrame::Error {
-                        request_id: None,
-                        code: "invalid-frame".to_string(),
-                        message: error.to_string(),
-                        details: None,
-                    },
-                )?;
+                // Invalid-frame responses ride the same bounded FIFO as
+                // every other outbound frame (the owner-loop write
+                // discipline law): writing them straight to the pipe here
+                // would let a later request's error overtake earlier queued
+                // responses and bypass the queue bound.
+                writer.enqueue(ServerFrame::Error {
+                    request_id: None,
+                    code: "invalid-frame".to_string(),
+                    message: error.to_string(),
+                    details: None,
+                });
                 continue;
             }
         };
@@ -446,15 +462,12 @@ fn read_available_frames(
             }
             Err(error) => {
                 let request_id = extract_request_id(line);
-                write_frame_to_pipe(
-                    stream,
-                    &ServerFrame::Error {
-                        request_id,
-                        code: "invalid-frame".to_string(),
-                        message: error.to_string(),
-                        details: None,
-                    },
-                )?;
+                writer.enqueue(ServerFrame::Error {
+                    request_id,
+                    code: "invalid-frame".to_string(),
+                    message: error.to_string(),
+                    details: None,
+                });
             }
         }
     }
@@ -546,6 +559,7 @@ fn wide_null(value: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::BufRead;
     use std::path::Path;
     use std::time::Instant;
 
@@ -617,6 +631,53 @@ mod tests {
         ]
         .map(ToOwned::to_owned);
         crate::parse_broker_options(args.into_iter()).expect("broker options")
+    }
+
+    #[test]
+    fn invalid_frame_responses_ride_the_bounded_fifo_behind_queued_frames() {
+        let sink = collector();
+        let endpoint = pipe_endpoint("invalid-fifo");
+        let mut server = create_pipe(&endpoint).expect("server pipe");
+        let mut client = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&endpoint)
+            .expect("client pipe");
+        let events = collector_events(&sink);
+        let (writer, outbound) = OutboundWriter::new(60, events.clone());
+        // A response frame is queued BEFORE the malformed input arrives:
+        // the invalid-frame error must ride the FIFO behind it, never
+        // overtake it on the wire.
+        writer.enqueue(ServerFrame::Ack {
+            request_id: "queued".to_string(),
+        });
+        client.write_all(b"not json at all\n").expect("write malformed line");
+        thread::sleep(PIPE_POLL_INTERVAL * 3);
+        let available = available_pipe_bytes(&server).expect("peek inbound");
+        assert!(available > 0, "the malformed line must be readable");
+        let mut inbound: Vec<u8> = Vec::new();
+        let send = collector_events(&sink);
+        read_available_frames(60, &mut server, available, &mut inbound, &send, &writer)
+            .expect("read malformed frame");
+        // Draining writes the queued ack first, then the queued error.
+        assert!(
+            drain_outbound(&mut server, &outbound, &writer),
+            "the bounded drain writes both frames"
+        );
+        let client_read = client.try_clone().expect("client read clone");
+        let mut reader = std::io::BufReader::new(client_read);
+        let mut first = String::new();
+        reader.read_line(&mut first).expect("read first line");
+        let mut second = String::new();
+        reader.read_line(&mut second).expect("read second line");
+        let first_json: serde_json::Value =
+            serde_json::from_str(first.trim()).expect("first frame json");
+        let second_json: serde_json::Value =
+            serde_json::from_str(second.trim()).expect("second frame json");
+        assert_eq!(first_json["type"].as_str(), Some("ack"));
+        assert_eq!(first_json["requestId"].as_str(), Some("queued"));
+        assert_eq!(second_json["type"].as_str(), Some("error"));
+        assert_eq!(second_json["code"].as_str(), Some("invalid-frame"));
     }
 
     #[test]

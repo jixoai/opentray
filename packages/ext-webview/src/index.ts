@@ -17,6 +17,7 @@ import type {
 import type {
   NativeExtensionArtifact,
   TransportRebuildContext,
+  TransportRequestOptions,
   TrayExtension,
   TrayExtensionContext,
   TrayHandle,
@@ -777,6 +778,14 @@ export class WebviewExtensionLoadError extends Error {
 }
 
 const WEBVIEW_EXTENSION_NAME = "webview";
+/**
+ * First-bring-up budget for a window's initial `show` (and its post-recovery
+ * rebuild): native WebView creation on cold hardware is a bootstrap-class
+ * operation, matching the SDK's `BOOTSTRAP_CALL_DEADLINE_MS` budget class.
+ * Declared locally because the facade takes no runtime dependency on the
+ * SDK package.
+ */
+const FIRST_SHOW_DEADLINE_MS = 10_000;
 /** Permission-manager drain cadence. This 16 ms interval is deliberately
  * preserved: permission resolution is a separate request/reply mechanism
  * (design-reference D19 open-question ruling 8), not part of the retired
@@ -867,7 +876,10 @@ export const attachWebview = (
 };
 
 interface WebviewEndpoint {
-  command<TResult = unknown>(command: WebviewCommand): Promise<TResult>;
+  command<TResult = unknown>(
+    command: WebviewCommand,
+    callOptions?: TransportRequestOptions
+  ): Promise<TResult>;
   listen<TPayload = unknown>(
     event: string,
     handler: (event: WebviewWindowEvent<TPayload>) => void
@@ -929,14 +941,15 @@ const createWebviewEndpoint = (
 ): WebviewEndpoint => {
   return {
     async command<TResult = unknown>(
-      command: WebviewCommand
+      command: WebviewCommand,
+      callOptions?: TransportRequestOptions
     ): Promise<TResult> {
       try {
         await context.ensureLoaded();
       } catch (error) {
         throw new WebviewExtensionLoadError(context, error);
       }
-      const result = await context.request(command);
+      const result = await context.request(command, callOptions);
       // WebView commands are immediate (V1 command surface): a deferred
       // terminal for this extension is a contract violation, not a value.
       if (result.kind !== "immediate") {
@@ -1307,7 +1320,13 @@ const createWebviewWindowHandle = (
         ? { windowOnly: true, windowId: orchestrationWindowId }
         : {}),
     } satisfies WebviewCommand;
-    await endpoint.command<void>(showCommand);
+    // First bring-up (and its post-recovery rebuild) creates the native
+    // WebView session — a bootstrap-class operation on cold hardware, not
+    // an interactive-class round-trip.
+    await endpoint.command<void>(
+      showCommand,
+      wasBootstrapped ? undefined : { deadlineMs: FIRST_SHOW_DEADLINE_MS },
+    );
     bootstrapped = true;
     appReopenRegistration?.setBootstrapped(true);
     if (!wasBootstrapped) {
