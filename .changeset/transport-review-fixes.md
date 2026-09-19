@@ -1,0 +1,5 @@
+---
+"opentray": patch
+---
+
+Transport robustness review fixes (issue #11, Codex review round): facade rebuild callbacks now route through the adoption candidate (WebView zero-config recovery actually completes instead of failing against the dead generation), a shutdown racing recovery aborts instead of resurrecting the runtime (teardown-epoch guard, double-checked around reconnect and adoption commit), the heartbeat is single-flight per generation (a configured interval shorter than the probe deadline can no longer run concurrent probes that miscount failures), and each reconnect attempt is bounded (`recovery.connectTimeoutMs`, default 10 s) with late-resolving connections closed on arrival. Broker side: windows invalid-frame responses enqueue into the bounded FIFO instead of writing the pipe directly, and both platforms emit exactly one Disconnected per session death (reader/pump exit suppression after escalation). The first WebView show and its post-recovery rebuild use a bootstrap-class 10 s budget; extension request calls accept an optional transport call-options parameter.
