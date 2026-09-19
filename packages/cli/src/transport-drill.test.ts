@@ -167,7 +167,7 @@ describe("transport robustness drill (W8 permanent gate)", () => {
       // THE consumer, in full (issue #11 acceptance criterion 1):
       const tray = await createTray(
         { id: "drill", tooltip: { title: "transport drill", description: "W8 kill -9 drill" } },
-        { homeDir, appId, appName },
+        { homeDir: homeDir as string, appId, appName },
       );
       const states: TransportState[] = [];
       tray.onTransportStateChange?.((state) => {
@@ -226,13 +226,18 @@ describe("transport robustness drill (W8 permanent gate)", () => {
             deadListeners.delete(listener);
           };
         },
+        onDeadlineExpiry() {
+          return () => {};
+        },
         onEvent() {
           return () => {};
         },
         async close() {},
         async request(): Promise<ServerFrame> {
-          // Wedged shape; never called on this leg before death.
+          // Wedged shape; never called on this leg before death. The
+          // unreachable throw only satisfies the declared return type.
           await new Promise<void>(() => {});
+          throw new Error("unreachable: wedged request never settles");
         },
       };
       let connectCalls = 0;
