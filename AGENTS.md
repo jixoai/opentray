@@ -764,7 +764,13 @@ Established by `harden-transport-robustness` (issue #11, the pnpm-pub
   to end (poll-ticked accept, bounded join with detach), and endpoint file
   removal is `(dev,ino)`-guarded so a replacement broker's endpoint is never
   destroyed. The Exit ack gets one bounded final-flush window on process
-  exit.
+  exit. The Unix writer serializes through a per-frame-flushed `BufWriter`:
+  writing JSON straight onto the raw descriptor is one syscall per token,
+  and Linux's per-skb truesize accounting against `SO_SNDBUF` parks such a
+  writer after a few hundred tiny writes to a not-yet-draining peer — one
+  flush per frame is the wire-atomicity-preserving fix (empirical
+  2026-09-20: release-verify failure on Linux, minimal std-only probe
+  isolation, container-verified fix; macOS accounting differs and hides it).
 - The kill -9 recovery drill and the deterministic budget-exhaustion leg are
   permanently green gates in the client test suite; the kill leg runs
   wherever a broker binary of this checkout is resolvable and skips loudly
