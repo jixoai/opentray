@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-opener",
-  "version": "0.31.2",
+  "version": "0.31.3",
   "description": "Official OpenTray native opener extension: open URLs and files with the user's default application, or reveal them in the file manager.",
   "type": "module",
   "license": "MIT",

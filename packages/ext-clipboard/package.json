@@ -1,6 +1,6 @@
 {
   "name": "@opentray/ext-clipboard",
-  "version": "0.31.2",
+  "version": "0.31.3",
   "description": "Official OpenTray native clipboard extension: read, write, and clear system clipboard text.",
   "type": "module",
   "license": "MIT",
