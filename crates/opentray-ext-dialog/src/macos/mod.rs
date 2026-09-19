@@ -47,6 +47,8 @@ use crate::state::{
     split_default_path, typed_error, ModalKind,
 };
 
+pub(crate) mod bridge;
+
 /// One native modal session. Constructed on the main thread by [`begin`];
 /// consumed by [`finish`] (natural completion) or [`revoke`] (session
 /// close/deinit). Never crosses threads.
@@ -68,6 +70,10 @@ enum NativePanel {
     Save {
         panel: Retained<NSSavePanel>,
     },
+    /// The osascript presentation fallback (macOS 26 signing-class law —
+    /// see `bridge`): the child replaces the AppKit modal session and
+    /// `poll_owner` steps `try_wait` instead of `runModalSession`.
+    Bridge(bridge::BridgeDialog),
 }
 
 /// One `poll_owner` step outcome: the session keeps running, or it ended
@@ -92,18 +98,19 @@ fn require_main_thread() -> Result<MainThreadMarker, opentray_spec::TypedExtensi
 /// frame, no operation, no terminal).
 pub(crate) fn begin(kind: &ModalKind) -> Result<NativeModal, opentray_spec::TypedExtensionError> {
     let mtm = require_main_thread()?;
+    // Presentation triage (macOS 26 signing-class law, issue #10 round 2;
+    // empirical isolation matrix 2026-09-19): an ad-hoc/linker-signed
+    // carrier's in-process NSAlert/panel renders in the degenerate
+    // non-key form and never receives any click — human or synthetic —
+    // under every activation strategy; activation cannot fix a signing
+    // class. A properly signed carrier keeps this full in-process path
+    // (and activating before the session begins remains correct for it);
+    // unsigned carriers present through the Apple-signed osascript host
+    // (`bridge`). Same law family as the ext-notification bridge.
+    if !bridge::alert_presentation_available() {
+        return begin_bridge(kind);
+    }
     let app = NSApplication::sharedApplication(mtm);
-    // Modal sessions need an ACTIVE host (issue #10): the broker runs as an
-    // unactivated Accessory-policy app between surfaces, and AppKit routes a
-    // non-active app's first (and, for Accessory apps, every) mouse click to
-    // application activation instead of the modal's buttons — runModalSession
-    // then never ends, the facade promise hangs, and the alert renders in the
-    // degenerate non-key-window form (blank button slot, suppression
-    // placeholder). Activating before the session begins makes the modal's
-    // window the key window so clicks reach the buttons; the system
-    // de-activates the app naturally after the terminal. The same family
-    // law as the Darwin carrier's app-mode aggregation: the host activation
-    // state is part of the projection, not the caller's concern.
     app.activateIgnoringOtherApps(true);
     let (panel, session) = match kind {
         ModalKind::Message(options) => {
@@ -175,6 +182,49 @@ pub(crate) fn begin(kind: &ModalKind) -> Result<NativeModal, opentray_spec::Type
     })
 }
 
+/// The bridge half of [`begin`]: compose the osascript statement (argv
+/// references only), spawn the child, and register it under the same
+/// DeferredOperation transaction — spawn success is the Accepted frame,
+/// child exit is the modal-terminal event. Composition rejections
+/// (>3 buttons, mixed file+directory selection) fail synchronously typed
+/// before any spawn (pre-Accept: zero frames, matching the win32
+/// pre-entry law).
+fn begin_bridge(kind: &ModalKind) -> Result<NativeModal, opentray_spec::TypedExtensionError> {
+    let spawn = |statement: String,
+                 argv: Vec<String>,
+                 buttons: Vec<String>|
+     -> Result<NativeModal, opentray_spec::TypedExtensionError> {
+        let child = bridge::spawn_bridge(&statement, &argv)?;
+        Ok(NativeModal {
+            panel: NativePanel::Bridge(bridge::BridgeDialog {
+                child,
+                buttons,
+                output: String::new(),
+                parsed: None,
+            }),
+            session: None,
+        })
+    };
+    match kind {
+        ModalKind::Message(options) => {
+            let (statement, argv) = bridge::compose_display_dialog(options)?;
+            spawn(statement, argv, options.buttons.clone())
+        }
+        ModalKind::PickFile(options) => {
+            let (statement, argv) = bridge::compose_choose_file(options)?;
+            spawn(statement, argv, Vec::new())
+        }
+        ModalKind::PickDirectory(options) => {
+            let (statement, argv) = bridge::compose_choose_folder(options);
+            spawn(statement, argv, Vec::new())
+        }
+        ModalKind::PickSavePath(options) => {
+            let (statement, argv) = bridge::compose_choose_file_name(options);
+            spawn(statement, argv, Vec::new())
+        }
+    }
+}
+
 /// Advances the modal session by one `runModalSession` quantum. This is
 /// the only step entry the broker's `poll_owner` calls; each quantum
 /// returns so menu/transport frames keep flowing between steps.
@@ -182,6 +232,25 @@ pub(crate) fn step(
     native: &mut NativeModal,
 ) -> Result<ModalStep, opentray_spec::TypedExtensionError> {
     let mtm = require_main_thread()?;
+    if let NativePanel::Bridge(dialog) = &mut native.panel {
+        // The bridge child replaces the AppKit modal session: one
+        // try_wait per owner quantum. Child exit drains stdout and parses
+        // the terminal right here (the bridge structures are "alive" at
+        // this point, mirroring the AppKit extraction contract).
+        return match dialog.child.try_wait() {
+            Ok(Some(_status)) => {
+                dialog.output = bridge::drain_child_stdout(&mut dialog.child);
+                let buttons = dialog.buttons.clone();
+                dialog.parsed = Some(bridge::parse_bridge_output(&dialog.output, &buttons));
+                Ok(ModalStep::Ended(0))
+            }
+            Ok(None) => Ok(ModalStep::Continue),
+            Err(error) => Err(typed_error(
+                error_code::PRESENTATION_FAILED,
+                format!("bridge child wait failed: {error}"),
+            )),
+        };
+    }
     let Some(session) = native.session else {
         // Already torn down: nothing to step, nothing ended here.
         return Ok(ModalStep::Continue);
@@ -205,6 +274,60 @@ pub(crate) fn extract_terminal(
     kind: &ModalKind,
     code: isize,
 ) -> ExtOperationPayload {
+    if let NativePanel::Bridge(dialog) = &native.panel {
+        // The bridge terminal was parsed at child exit (`step`); the
+        // modal `code` carries no meaning for a child process.
+        let _ = code;
+        return match dialog.parsed.clone() {
+            Some(Ok(bridge::BridgeOutcome::Button(response))) => {
+                ExtOperationPayload::Result {
+                    value: terminal::message_result(MessageDialogResult {
+                        response,
+                        // suppressionLabel is not expressible through the
+                        // osascript bridge (documented degradation).
+                        suppressed: false,
+                    }),
+                }
+            }
+            Some(Ok(bridge::BridgeOutcome::Canceled)) => match kind {
+                ModalKind::Message(options) => {
+                    let cancel = options
+                        .cancel_id
+                        .unwrap_or(options.buttons.len().saturating_sub(1));
+                    ExtOperationPayload::Result {
+                        value: terminal::message_result(MessageDialogResult {
+                            response: cancel,
+                            suppressed: false,
+                        }),
+                    }
+                }
+                _ => ExtOperationPayload::Result {
+                    value: terminal::picker_canceled(),
+                },
+            },
+            Some(Ok(bridge::BridgeOutcome::SinglePath(path))) => match kind {
+                ModalKind::PickSavePath(_) => ExtOperationPayload::Result {
+                    value: terminal::pick_single_path(canonicalize_save_leaf(&path)),
+                },
+                _ => ExtOperationPayload::Result {
+                    value: terminal::pick_single_path(canonicalize_existing(&path)),
+                },
+            },
+            Some(Ok(bridge::BridgeOutcome::MultiplePaths(paths))) => {
+                let paths: Vec<String> =
+                    paths.iter().map(|path| canonicalize_existing(path)).collect();
+                ExtOperationPayload::Result {
+                    value: terminal::pick_file_paths(paths),
+                }
+            }
+            Some(Err(error)) => ExtOperationPayload::Error { error },
+            // `extract_terminal` runs after an Ended step, which always
+            // fills `parsed`; the unset case is unconstructible.
+            None => ExtOperationPayload::Result {
+                value: terminal::picker_canceled(),
+            },
+        };
+    }
     let confirmed = code == NSModalResponseOK;
     match (&native.panel, kind) {
         (
@@ -277,6 +400,11 @@ pub(crate) fn extract_terminal(
 /// code; release it and drop the panel.
 pub(crate) fn finish(native: NativeModal) {
     let mut native = native;
+    if let NativePanel::Bridge(dialog) = &mut native.panel {
+        // Natural completion: the child already exited; reap it.
+        bridge::dispose_child(&mut dialog.child);
+        return;
+    }
     if let (Some(mtm), Some(session)) = (MainThreadMarker::new(), native.session.take()) {
         let app = NSApplication::sharedApplication(mtm);
         // SAFETY: the session ended with a terminal response; ending it
@@ -291,6 +419,12 @@ pub(crate) fn finish(native: NativeModal) {
 /// mechanism ESC/title-bar close route through), then end the session.
 pub(crate) fn revoke(native: NativeModal) {
     let mut native = native;
+    if let NativePanel::Bridge(dialog) = &mut native.panel {
+        // The child may still be presenting; killing it dismisses the
+        // bridge dialog with the process.
+        bridge::dispose_child(&mut dialog.child);
+        return;
+    }
     if let (Some(mtm), Some(session)) = (MainThreadMarker::new(), native.session.take()) {
         let app = NSApplication::sharedApplication(mtm);
         app.stopModalWithCode(-1001); // NSModalResponseAbort

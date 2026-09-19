@@ -579,6 +579,22 @@ implementation batches A 8.8 / B 9.0 / C 9.1 GO). Design SSOT:
   array is the caller's all-files spelling normalized to wire omission — darwin
   `setAllowedContentTypes([])` would mean nothing-selectable, and win32 skips `SetFileTypes`
   for empty lists (commit 3449868b).
+- darwin dialog presentation law (empirical macOS 26 matrix, 2026-09-19, issue #10 round 2):
+  interactive dialog presentation is gated by the carrier's code-signing class, the same
+  family as the UN notification refusal. An ad-hoc/linker-signed carrier's in-process
+  NSAlert/panel renders in the degenerate form (untitled stacked button slots, stray help
+  button, `<`-prefixed suppression placeholder) and never receives any click — human or
+  routed-synthetic — under every activation strategy (`activateIgnoringOtherApps` cannot
+  change a signing class; the 0.31.1 activation-only fix is retired). Presentation triages
+  the process signature (SecCodeCopySelf family, same as ext-notification): properly signed
+  carriers keep the in-process AppKit path; unsigned/ad-hoc carriers present through the
+  Apple-signed `/usr/bin/osascript` host (`display dialog`, `choose file/folder/file name`)
+  inside the same DeferredOperation transaction — spawn is the Accepted frame, child exit is
+  the terminal, session cleanup kills the child, and every payload crosses as run ARGV
+  (never AppleScript literal interpolation). Bridge degradations are documented, never
+  silent: `detail` folds into the message, `suppressionLabel` resolves `suppressed: false`,
+  filter names drop (extension union applies), >3 buttons and mixed file+directory
+  selection reject typed (`bridge-buttons-limit` / `bridge-mixed-selection-unsupported`).
 - Dialog command scopes are broker-injected `(appId, trayId, sessionId, instanceGeneration)`;
   extensions never self-report session identity, and this change family does not expand the
   single-session caller-scoped broker runtime.
