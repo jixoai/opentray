@@ -11,10 +11,14 @@
 
 ## 2. Client transport correctness（W1 / W3 — Phase A）
 
-- [ ] 2.1 `packages/cli` 运输层 per-call deadline：`LocalBrokerConnection.request()` 挂预算类（interactive 5s / teardown 2s / bootstrap 10s），到期 typed 超时拒绝，晚到回复安全丢弃（pending 条目已删除即 no-op）。
-- [ ] 2.2 typed 拒绝分类法落位：`TransportTimeoutError` 与 transport-lost / broker-rejected 家族区分；deferred 操作超时保持 `ExtensionOperationError` 家族语义一致。
-- [ ] 2.3 有界 teardown：`destroy()`/`close()` 墙钟（每原生步 2s + 排水），P3.6 优雅退出哨兵语义逐字保留；caller-initiated 路径永不触发恢复。
-- [ ] 2.4 单测（移植 pnpm-pub 场景形状）：never-settle 在预算内拒绝；晚到回复丢弃；happy path 零可观测开销；wedged handle 的 destroy 有界且原生 destroy 仍被发出。
+- [x] 2.1 `packages/cli` 运输层 per-call deadline：`LocalBrokerConnection.request()` 挂预算类（interactive 5s / teardown 2s / bootstrap 10s），到期 typed 超时拒绝，晚到回复安全丢弃（pending 条目已删除即 no-op）。
+  - 证据：f059dc7a；`TransportTimeoutError` 第三拒绝类；`init()` 10s bootstrap race。
+- [x] 2.2 typed 拒绝分类法落位：`TransportTimeoutError` 与 transport-lost / broker-rejected 家族区分；deferred 操作超时保持 `ExtensionOperationError` 家族语义一致。
+  - 证据：f059dc7a + 09cc0e07（review 修正为两阶段律：deadline 只覆盖 dispatch→acceptance，受理即停表——用户持握的模态对话框不受 transport deadline 杀死，终帧只受运输活性约束）。spec delta 同步冻结两阶段律。
+- [x] 2.3 有界 teardown：`destroy()`/`close()` 墙钟（每原生步 2s + 排水），P3.6 优雅退出哨兵语义逐字保留；caller-initiated 路径永不触发恢复。
+  - 证据：f059dc7a；`close()` 2s 降级 `destroy()` 后 resolve；destroy-tray 帧带 `{deadlineMs: 2000}` 标记（Phase D 的 teardown 类通道）。
+- [x] 2.4 单测（移植 pnpm-pub 场景形状）：never-settle 在预算内拒绝；晚到回复丢弃；happy path 零可观测开销；wedged handle 的 destroy 有界且原生 destroy 仍被发出。
+  - 证据：164/164（packages/cli vitest）+ typecheck exit 0（两阶段修正后复跑）。
 
 ## 3. Broker-side road repair（W7 — Phase B）
 
