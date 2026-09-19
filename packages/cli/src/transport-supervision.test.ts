@@ -1267,6 +1267,11 @@ describe("transport supervision review-round fixes (codex P1s)", () => {
       } },
     );
     await supervisor.connect();
+    // Edge-captured states: the recovering transition can be transient
+    // (a fast recovery settles back to healthy between poll samples), so
+    // the assertion must read recorded edges, not sample the live state.
+    const states: string[] = [];
+    supervisor.onTransportStateChange((state) => states.push(state));
     // With a wedged 120 ms probe and a 5 ms interval, an unguarded loop
     // would have started ~30 probes by now; single-flight starts one.
     await new Promise((resolve) => {
@@ -1280,7 +1285,7 @@ describe("transport supervision review-round fixes (codex P1s)", () => {
 
     // Death is still declared once the threshold of settled failures
     // accumulates — one probe at a time.
-    await eventually(() => supervisor.transportState === "recovering");
+    await eventually(() => states.includes("recovering"));
   });
 
   it("bounds a hanging reconnect attempt and closes its late-resolving connection", async () => {
