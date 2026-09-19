@@ -542,3 +542,268 @@ fn write_ready_file(options: &BrokerOptions) -> std::io::Result<()> {
 fn wide_null(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(Some(0)).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use std::time::Instant;
+
+    /// Transport-robustness W7 (B4), Windows leg: the bounded pump queue
+    /// escalates without parking the producer, keeps response frames ahead
+    /// of event frames, and the bounded final drain gives up on a wedged
+    /// queue. The full disconnect cleanup chain is the owner loop's existing
+    /// handler for the same `TransportEvent::Disconnected` these tests
+    /// observe.
+
+    fn collector() -> Arc<Mutex<Vec<TransportEvent>>> {
+        Arc::new(Mutex::new(Vec::new()))
+    }
+
+    fn collector_events(sink: &Arc<Mutex<Vec<TransportEvent>>>) -> EventSender {
+        let sink = sink.clone();
+        Arc::new(move |event| sink.lock().expect("collector lock").push(event))
+    }
+
+    fn error_frame(sequence: usize, payload: &str) -> ServerFrame {
+        ServerFrame::Error {
+            request_id: None,
+            code: format!("seq-{sequence}"),
+            message: payload.to_string(),
+            details: None,
+        }
+    }
+
+    fn has_disconnected(sink: &Arc<Mutex<Vec<TransportEvent>>>, id: u64) -> bool {
+        sink.lock()
+            .expect("collector lock")
+            .iter()
+            .any(|event| matches!(event, TransportEvent::Disconnected { id: seen } if *seen == id))
+    }
+
+    fn pipe_endpoint(name: &str) -> String {
+        format!(
+            r"\\.\pipe\opentray-transport-test-{}-{name}",
+            std::process::id()
+        )
+    }
+
+    fn ready_file_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "opentray-transport-test-{}-{name}.ready.json",
+            std::process::id()
+        ))
+    }
+
+    fn test_broker_options(endpoint: &str, ready_file: &Path) -> BrokerOptions {
+        let (executable_path, artifact_identity) = crate::resolve_current_broker_artifact(
+            "0.0.0-transport-test",
+        )
+        .expect("current broker artifact");
+        let identity = serde_json::to_string(&artifact_identity).expect("artifact identity json");
+        let args = [
+            "--endpoint",
+            endpoint,
+            "--ready-file",
+            &ready_file.to_string_lossy(),
+            "--package-version",
+            "0.0.0-transport-test",
+            "--protocol-version",
+            "2",
+            "--broker-executable-path",
+            &executable_path.to_string_lossy(),
+            "--broker-artifact-identity",
+            &identity,
+        ]
+        .map(ToOwned::to_owned);
+        crate::parse_broker_options(args.into_iter()).expect("broker options")
+    }
+
+    #[test]
+    fn full_outbound_queue_escalates_without_parking_the_producer() {
+        let sink = collector();
+        // No pump drains: the queue-side model of a client that stopped
+        // reading (its pump is parked inside a full pipe buffer, so nothing
+        // dequeues).
+        let (writer, _never_drained) = OutboundWriter::new(42, collector_events(&sink));
+        let started = Instant::now();
+        for sequence in 0..OUTBOUND_QUEUE_CAPACITY {
+            writer.enqueue(error_frame(sequence, "fill"));
+        }
+        assert!(
+            sink.lock().expect("collector lock").is_empty(),
+            "enqueues below the bound must not escalate"
+        );
+        writer.enqueue(error_frame(OUTBOUND_QUEUE_CAPACITY, "overflow"));
+        assert!(
+            has_disconnected(&sink, 42),
+            "the capacity-overflow enqueue escalates synchronously"
+        );
+        writer.enqueue(error_frame(OUTBOUND_QUEUE_CAPACITY + 1, "post-escalation"));
+        assert_eq!(
+            sink.lock()
+                .expect("collector lock")
+                .iter()
+                .filter(|event| matches!(event, TransportEvent::Disconnected { .. }))
+                .count(),
+            1,
+            "escalation is deduped by the one-shot flag"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "the producer never parks on a full queue"
+        );
+    }
+
+    #[test]
+    fn outbound_queue_is_fifo_response_before_event() {
+        let sink = collector();
+        let (writer, outbound) = OutboundWriter::new(43, collector_events(&sink));
+        // A command response frame enqueued before the same dispatch's
+        // mirrored event frame must be written first (EventPort
+        // close-ordering law). The pump write path is exercised through the
+        // shared `drain_outbound` helper into a regular file, which the
+        // byte-oriented writer accepts identically to a pipe handle.
+        writer.enqueue(ServerFrame::Ack {
+            request_id: "req-1".to_string(),
+        });
+        writer.enqueue(error_frame(1, "mirrored"));
+        let path = std::env::temp_dir().join(format!(
+            "opentray-transport-test-fifo-{}.jsonl",
+            std::process::id()
+        ));
+        let mut sink_file = File::create(&path).expect("create fifo sink file");
+        assert!(
+            drain_outbound(&mut sink_file, &outbound, &writer),
+            "the bounded drain writes both frames"
+        );
+        drop(sink_file);
+        let written = std::fs::read_to_string(&path).expect("read fifo sink file");
+        let _ = std::fs::remove_file(&path);
+        let mut lines = written.lines();
+        let response: serde_json::Value =
+            serde_json::from_str(lines.next().expect("response frame line").trim())
+                .expect("response frame json");
+        let event: serde_json::Value =
+            serde_json::from_str(lines.next().expect("event frame line").trim())
+                .expect("event frame json");
+        assert_eq!(response["type"].as_str(), Some("ack"));
+        assert_eq!(event["type"].as_str(), Some("error"));
+        assert!(
+            writer.drain_outbound(Duration::from_millis(50)),
+            "the settled queue drains immediately afterwards"
+        );
+    }
+
+    #[test]
+    fn drain_outbound_stays_bounded_when_wedged() {
+        // No pump ever drains: the bounded final drain gives up after its
+        // budget instead of parking the exit path.
+        let wedged_sink = collector();
+        let (wedged, _never_drained) = OutboundWriter::new(51, collector_events(&wedged_sink));
+        wedged.enqueue(error_frame(0, "wedge"));
+        let started = Instant::now();
+        assert!(
+            !wedged.drain_outbound(Duration::from_millis(50)),
+            "a wedged queue must not report a settled drain"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "the wedged drain is abandoned after its budget"
+        );
+    }
+
+    #[test]
+    fn listener_shutdown_returns_within_budget_without_clients() {
+        // No client ever connects; the wake-open satisfies ConnectNamedPipe
+        // and the bounded join must return well inside the budget, so broker
+        // exit can never park on the accept thread.
+        let endpoint = pipe_endpoint("shutdown-budget");
+        let ready_file = ready_file_path("shutdown-budget");
+        let listener = {
+            let sink = collector();
+            spawn_listener(
+                test_broker_options(&endpoint, &ready_file),
+                move |event| {
+                    sink.lock().expect("collector lock").push(event);
+                },
+            )
+            .expect("spawn listener")
+        };
+        let started = Instant::now();
+        listener.shutdown();
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "shutdown must stay bounded without clients (took {elapsed:?})"
+        );
+        let _ = std::fs::remove_file(&ready_file);
+    }
+
+    #[test]
+    fn listener_escalates_a_client_that_stops_draining_within_bounded_time() {
+        let endpoint = pipe_endpoint("stopped-drain");
+        let ready_file = ready_file_path("stopped-drain");
+        let sink = collector();
+        let listener = {
+            let sink = sink.clone();
+            spawn_listener(test_broker_options(&endpoint, &ready_file), move |event| {
+                sink.lock().expect("collector lock").push(event);
+            })
+            .expect("spawn listener")
+        };
+        // A connected client that never reads: the pipe buffer fills, the
+        // pump parks inside its write, and the bounded queue is the only
+        // remaining sink for outbound frames.
+        let _client = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&endpoint)
+            .expect("client open pipe");
+        let connected = {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                {
+                    let events = sink.lock().expect("collector lock");
+                    let connected = events.iter().find_map(|event| match event {
+                        TransportEvent::Connected { id, writer } => {
+                            Some((*id, writer.clone()))
+                        }
+                        _ => None,
+                    });
+                    if let Some(pair) = connected {
+                        break pair;
+                    }
+                }
+                if Instant::now() >= deadline {
+                    panic!("no Connected event within budget");
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let (session, writer) = connected;
+        let started = Instant::now();
+        let payload = "x".repeat(8192);
+        let mut escalated = false;
+        // 8 KiB frames: the pipe buffers plus the 1024-frame queue saturate
+        // far below this loop bound even with generous buffers.
+        for sequence in 0..(OUTBOUND_QUEUE_CAPACITY * 3) {
+            writer.enqueue(error_frame(sequence, &payload));
+            if has_disconnected(&sink, session) {
+                escalated = true;
+                break;
+            }
+        }
+        assert!(
+            escalated,
+            "a stopped-drain client must escalate Disconnected once the queue bound is hit"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "escalation must stay bounded, took {:?}",
+            started.elapsed()
+        );
+        listener.shutdown();
+        let _ = std::fs::remove_file(&ready_file);
+    }
+}
