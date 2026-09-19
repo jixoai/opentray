@@ -124,10 +124,42 @@ completed graceful close), the SDK reaches a terminal connection-dead state:
   immediately with the same message instead of hanging on a dead socket.
 - Event delivery stops. Eventful tray handles expose
   `tray.onConnectionDead(handler)` — present on local broker transports — which
-  fires exactly once with the terminal error; treat it as the fail-loud signal
-  to exit or supervised-restart an entry whose backend is gone.
+  fires exactly once per connection generation; treat it as the fail-loud signal
+  for that generation's cleanup.
 - `destroy()` treats the sentinel as the requested end state, so a Quit issued
   after broker death still settles.
+
+### Transport robustness and supervision
+
+The `createTray` runtime path wraps the broker connection in a supervised
+transport. Consumer contract (full guidance in the public
+`skills/opentray` reference `transport-robustness.md`):
+
+- Every transport call is deadline-bounded (interactive 5 s, teardown 2 s,
+  bootstrap 10 s — exported as `INTERACTIVE_CALL_DEADLINE_MS`,
+  `TEARDOWN_CALL_DEADLINE_MS`, `BOOTSTRAP_CALL_DEADLINE_MS`; overridable per
+  call through the optional `request(frame, { deadlineMs })` transport
+  parameter). A budget that expires settles that one call with the typed
+  `TransportTimeoutError`; late replies are discarded statelessly. Deferred
+  operations follow the two-phase rule: the deadline bounds
+  dispatch-to-acceptance, and an accepted operation (a held modal dialog)
+  settles with its terminal or the typed transport-close rejection — never a
+  transport deadline.
+- An *uninvited* connection death is detected by socket close/error or an
+  idle-gated heartbeat and recovers automatically with zero consumer code:
+  cooldown backoff, broker respawn through the same identity-gated connect
+  path, declarative journal replay (tray options, last-set mutations,
+  extension mounts), registered facade rebuilds, then a full state snapshot
+  re-emit. A bounded budget (3 attempts per 10 min, in-memory) caps the
+  loop; exhaustion is the terminal `abandoned` state where every call fails
+  fast with `TransportAbandonedError` (code `transport_abandoned`) and the
+  app keeps running headless. Caller-initiated teardown never recovers.
+- Health projection: `tray.onTransportStateChange(handler)` publishes
+  edge-triggered `healthy | recovering | abandoned`. The optional
+  `runtimeOptions.recovery` object exposes the policy knobs (`enabled`,
+  `maxRestarts`, `windowMs`, `cooldownMs`, `backoffFactor`, `backoffCapMs`)
+  and the Tier 2 `restartApp` callback, which replaces in-process recovery
+  with exactly one hand-over invocation.
 
 ### Extension commands and deferred operations
 

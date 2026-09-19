@@ -35,6 +35,7 @@ real behavior, and diagnose the installed runtime graph.
 - Ordinary application windows versus tray utilities, warm Dock reopen, cold `appLaunch`, and development supervisors: read `references/app-mode.md`.
 - Generating a brand App identity icon with the `@opentray/icon` kernel (`generateOpenTrayAppIcon`, composition semantics, the omitted-`appIcon` glyph default, and why hand-rolled `iconutil`/`sharp` pipelines are rejected): read `references/app-mode.md`.
 - Runtime ownership, application process lifetime, and persistent logs: read `references/runtime-ownership.md`.
+- Transport robustness (zero-config broker-death recovery, per-call deadlines, the `transportStateChange` health projection, the `recovery` option and its defaults, the WebView page-reload-on-recovery contract): read `references/transport-robustness.md`.
 - Packaging through a bundler (Vite/esbuild/tsdown/webpack), generating platform-correct App icons with the Vite `openTrayAppIconPlugin`, or writing a custom adapter: read `references/bundling.md`.
 - Consumer-project acceptance matrix: read `references/visual-acceptance.md`.
 - Official WebView extension usage, overlay titlebar safe-area computation, and native drag regions: read `references/ext-webview.md`.

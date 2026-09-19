@@ -57,9 +57,12 @@
 
 ## 6. Acceptance + docs（W8 / W9 — Phase E）
 
-- [ ] 6.1 kill -9 drill 常驻门：最小 ~5 行 createTray 应用夹具，杀 broker 后一个预算窗内自动恢复，零消费者恢复代码；确定性 wedge 模拟断言预算耗尽 → fail-fast + `abandoned`（无悬挂、无循环）。
-- [ ] 6.2 平台证据：macOS 本地 + CI；Windows 经 LAN 中继按仓法规律；核心侧（client/broker Rust/TS）双平台确定性测试。
-- [ ] 6.3 `skills/opentray` 消费者文档：恢复即页面 reload 契约、丢事件窗口 + 快照再发射保证、默认值表、Tier 0/1/2 阶梯。
+- [x] 6.1 kill -9 drill 常驻门：最小 ~5 行 createTray 应用夹具，杀 broker 后一个预算窗内自动恢复，零消费者恢复代码；确定性 wedge 模拟断言预算耗尽 → fail-fast + `abandoned`（无悬挂、无循环）。
+  - 证据：68dc791f `transport-drill.test.ts`——kill 腿走真实 broker（本检出 cargo 产物经 `OPENTRAY_BROKER_BIN`；无二进制时响亮 skip 并提示构建命令），断言 healthy→recovering→healthy 边沿 + 恢复后 round-trip + 干净销毁 + broker 退出；预算耗尽腿恒跑（恰好 maxRestarts 次尝试 + typed fail-fast + 无循环）。drill home 用短 POSIX /tmp 根守 sun_path 预算（AGENTS 法则）。
+- [x] 6.2 平台证据：macOS 本地 + CI；Windows 经 LAN 中继按仓法规律；核心侧（client/broker Rust/TS）双平台确定性测试。
+  - 证据：macOS drill 绿（5.5s，185/185 全包）；Windows 真机（中继 gaubeehonor @ da731621）Rust 套件 131/131 含 5 个新 windows_transport 测试；TS kill 腿无二进制自动 skip（确定性腿恒跑）。
+- [x] 6.3 `skills/opentray` 消费者文档：恢复即页面 reload 契约、丢事件窗口 + 快照再发射保证、默认值表、Tier 0/1/2 阶梯。
+  - 证据：`skills/opentray/references/transport-robustness.md` + SKILL.md 路由行；`packages/cli/README.md` 公共 API 契约段（拒绝分类法/两阶段 deferred 律/预算与钩子面）。
 - [ ] 6.4 changeset + 版本推进按 monorepo 法；AGENTS.md 法则在归档时落档。
 
 ## 7. Verification
