@@ -121,8 +121,11 @@ existing spawn machinery with its identity gates, reconnect and handshake,
 replay the retained declarative journal (tray creation options, last-set
 menu/icon/tooltip, app name/icon mutations, extension mounts with their exact
 resolved artifacts and identities, webview windows with options, last-set
-styles, and event subscriptions), then query native state and re-emit a full
-state snapshot so consumers deriving state from event streams can resync.
+styles, settled visibility, and event subscriptions), then query native state
+and re-emit a full state snapshot so consumers deriving state from event
+streams can resync. Settled visibility is a journaled fact: a window that
+died hidden (the tray-panel `close()` idiom) is restored hidden after the
+bootstrap replay, and the post-replay snapshot reports the restored value.
 Recovery SHALL be capped by a budget of 3 respawns per 10-minute window by
 default (overridable; in-memory per process).
 

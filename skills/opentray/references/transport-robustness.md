@@ -113,11 +113,13 @@ vectors (entry paths and single-instance protocols are yours).
   snapshot, not from counting edges.
 - **Declarative state is replayed; imperative one-shot commands are not.**
   Menus, icons, tooltips, app identity, extension mounts, and WebView
-  windows (creation options plus last-set styles and subscriptions) come
-  back automatically. A destroyed tray stays destroyed. Incremental
-  orchestration performed after window bootstrap (children/layout added at
-  runtime beyond the declared options) is not yet retained — re-assert it in
-  a `transportStateChange` handler if you rely on it.
+  windows (creation options, last-set styles, settled visibility, and
+  subscriptions) come back automatically — a window that died hidden stays
+  hidden after recovery, and the post-recovery snapshot reports the restored
+  value. A destroyed tray stays destroyed. Incremental orchestration
+  performed after window bootstrap (children/layout added at runtime beyond
+  the declared options) is not yet retained — re-assert it in a
+  `transportStateChange` handler if you rely on it.
 - **Tray identity is stable across recovery.** Handles keep their tray ids;
   the broker-side assignment is replayed with the original id.
 - **Your own teardown never triggers recovery.** `destroy()` and explicit

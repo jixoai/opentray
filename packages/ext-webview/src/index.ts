@@ -1123,6 +1123,14 @@ const createWebviewWindowHandle = (
     orchestrationWindowId
   );
   let bootstrapped = false;
+  /**
+   * Settled visibility fact (W4 amendment, consumer-field evidence
+   * 2026-09-20): the last successful visibility op on this window. A
+   * supervised recovery replays it after the bootstrap re-show so a hidden
+   * retained window (the tray-panel `close()` idiom, `autoHide:false`)
+   * stays hidden instead of popping back open on every recovery.
+   */
+  let settledVisibilityOp: "show" | "hide" | "close" | undefined;
   // Cumulative last-set style (initial options + successful patches): the
   // declarative style truth a rebuild re-applies after re-showing.
   let lastStylePatch: WebviewWindowStylePatch | undefined = wireOptions.style;
@@ -1328,6 +1336,7 @@ const createWebviewWindowHandle = (
       wasBootstrapped ? undefined : { deadlineMs: FIRST_SHOW_DEADLINE_MS },
     );
     bootstrapped = true;
+    settledVisibilityOp = "show";
     appReopenRegistration?.setBootstrapped(true);
     if (!wasBootstrapped) {
       const initialStyle = command.style ?? options.style;
@@ -1373,6 +1382,13 @@ const createWebviewWindowHandle = (
       orchestrationWindowId
     );
     bootstrapped = false;
+    // The settled visibility fact survives the death: a window that died
+    // hidden (close()/hide(), e.g. the tray-panel retained idiom) must not
+    // come back open just because the bootstrap replay re-shows it.
+    const restoreVisibilityOp =
+      settledVisibilityOp === "hide" || settledVisibilityOp === "close"
+        ? settledVisibilityOp
+        : undefined;
     // Replay the retained bootstrap (wire options, declared children,
     // declared layout) against the fresh session — the WebView page reload
     // from its URL is contract, not implementation detail.
@@ -1385,6 +1401,15 @@ const createWebviewWindowHandle = (
         type: "setStyle",
         style: lastStylePatch,
       } satisfies WebviewCommand);
+    }
+    // Restore the settled visibility BEFORE the snapshot queries so the
+    // synthesized visibleChange reports the restored value, not the
+    // bootstrap replay's transient shown state.
+    if (restoreVisibilityOp !== undefined) {
+      await endpoint.command<void>({
+        type: restoreVisibilityOp,
+      } satisfies WebviewCommand);
+      settledVisibilityOp = restoreVisibilityOp;
     }
     // Full-state snapshot resync: query the queryable native families and
     // re-emit them through the same listener surface push events use.
@@ -1442,10 +1467,18 @@ const createWebviewWindowHandle = (
       return title;
     },
     hide() {
-      return endpoint.command<void>({ type: "hide" } satisfies WebviewCommand);
+      return endpoint
+        .command<void>({ type: "hide" } satisfies WebviewCommand)
+        .then(() => {
+          settledVisibilityOp = "hide";
+        });
     },
     close() {
-      return endpoint.command<void>({ type: "close" } satisfies WebviewCommand);
+      return endpoint
+        .command<void>({ type: "close" } satisfies WebviewCommand)
+        .then(() => {
+          settledVisibilityOp = "close";
+        });
     },
     async destroy() {
       // Stop the internal MRU listeners before native session cleanup: their
@@ -1476,9 +1509,13 @@ const createWebviewWindowHandle = (
       } satisfies WebviewCommand);
     },
     toVisible() {
-      return endpoint.command<void>({
-        type: "toVisible",
-      } satisfies WebviewCommand);
+      return endpoint
+        .command<void>({
+          type: "toVisible",
+        } satisfies WebviewCommand)
+        .then(() => {
+          settledVisibilityOp = "show";
+        });
     },
     focus() {
       return endpoint

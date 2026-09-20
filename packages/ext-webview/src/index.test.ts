@@ -2466,6 +2466,92 @@ describe("@opentray/ext-webview", () => {
     expect(seen).toEqual(["visibleChange:true", "moved:4:5", "resized:300x200"]);
   });
 
+  it("restores the settled visibility of a window that died hidden (W4 amendment)", async () => {
+    const rebuilds: Array<(context: TransportRebuildContext) => Promise<void>> = [];
+    const transport = new WebviewResultTransport((command) => {
+      if (!isWebviewCommand(command)) return { type: "unknown" };
+      if (command.type === "isVisible") return false;
+      if (command.type === "getBounds") {
+        return { x: 1, y: 2, width: 120, height: 80 };
+      }
+      return { type: "ok" };
+    });
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+    Object.assign(tray, {
+      registerTransportRebuild(
+        rebuild: (context: TransportRebuildContext) => Promise<void>,
+      ): void {
+        rebuilds.push(rebuild);
+      },
+    });
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({ html: "<main />" });
+    await webviewWindow.show();
+    // The tray-panel retained idiom: hide with close() (autoHide:false).
+    await webviewWindow.close();
+    expect(rebuilds).toHaveLength(1);
+    transport.frames.length = 0;
+    const seen: string[] = [];
+    webviewWindow.listen("visibleChange", (event) => {
+      seen.push(`visibleChange:${String((event.payload as { visible: boolean }).visible)}`);
+    });
+
+    const rebuild = rebuilds[0];
+    if (rebuild === undefined) {
+      throw new Error("expected a registered rebuild callback");
+    }
+    await rebuild({ generation: 1, sessionId: "session-2" });
+
+    // The bootstrap replay re-shows the window, then the settled close()
+    // is restored BEFORE the snapshot query, so the synthesized
+    // visibleChange reports the restored hidden state.
+    expect(extCommandTypes(transport)).toEqual([
+      "subscribeWindowEvents",
+      "show",
+      "subscribeWindowEvents",
+      "close",
+      "isVisible",
+      "getBounds",
+    ]);
+    expect(seen).toEqual(["visibleChange:false"]);
+  });
+
+  it("restores a hide()-settled window through hide, not close (W4 amendment)", async () => {
+    const rebuilds: Array<(context: TransportRebuildContext) => Promise<void>> = [];
+    const transport = new WebviewResultTransport((command) => {
+      if (!isWebviewCommand(command)) return { type: "unknown" };
+      if (command.type === "isVisible") return false;
+      if (command.type === "getBounds") {
+        return { x: 0, y: 0, width: 10, height: 10 };
+      }
+      return { type: "ok" };
+    });
+    const tray = createTrayHandle(transport, "app-1", "tray-1");
+    Object.assign(tray, {
+      registerTransportRebuild(
+        rebuild: (context: TransportRebuildContext) => Promise<void>,
+      ): void {
+        rebuilds.push(rebuild);
+      },
+    });
+    const webviewWindow = tray
+      .extend(WebviewExt, { mountId: "webview.tray-1" })
+      .createWebviewWindow({ html: "<main />" });
+    await webviewWindow.show();
+    await webviewWindow.hide();
+    transport.frames.length = 0;
+
+    const rebuild = rebuilds[0];
+    if (rebuild === undefined) {
+      throw new Error("expected a registered rebuild callback");
+    }
+    await rebuild({ generation: 1, sessionId: "session-2" });
+
+    expect(extCommandTypes(transport)).toContain("hide");
+    expect(extCommandTypes(transport)).not.toContain("close");
+  });
+
   it("skips the transport rebuild for a window destroyed before the transport died (W4)", async () => {
     const rebuilds: Array<(context: TransportRebuildContext) => Promise<void>> = [];
     const transport = new WebviewResultTransport((command) => {
