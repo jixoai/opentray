@@ -1,5 +1,14 @@
 # opentray
 
+## 0.33.2
+
+### Patch Changes
+
+- 73a5550: Transport robustness W4 amendment (consumer field evidence): a supervised recovery now restores each WebView window's settled visibility. The rebuild replay previously re-showed every window as a side effect of replaying the bootstrap, so a hidden retained window (the tray-panel `close()` idiom with `autoHide:false`) popped back open on every recovery. The facade journals the settled visibility op (last successful show/hide/close) and restores it after the style replay, before the snapshot queries — the post-recovery `visibleChange` reports the restored value.
+  - @opentray/icon@0.33.2
+  - @opentray/spec@0.33.2
+  - @opentray/packaging@0.33.2
+
 ## 0.33.1
 
 ### Patch Changes
