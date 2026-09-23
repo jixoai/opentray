@@ -1,48 +1,54 @@
-// Orthogonal intents (maintained 2026-09-18; original user request: win32
-// notify must reuse the caller's registered tray icon channel —
-// add-ext-notification design reference section 2, frozen O1=B ruling):
-// 1. Project one scope-bound notify command onto the registered tray icon's
-//    Shell_NotifyIcon NIF_INFO channel: no new window, no new identity atom,
-//    the same (HWND, uID) registration law the vendored tray backend owns.
-// 2. Fill the fixed UTF-16 balloon fields verbatim: the facade preflight has
-//    already enforced the frozen 64/256/64 common-subset boundary and joined
-//    the win32 subtitle into the body, so at-boundary values pass through
-//    with no re-truncation (design section 1 payload freeze).
-// 3. Surface typed rejections with the family's error-code contract:
+// Orthogonal intents (amended 2026-09-23; original user request: win32
+// notify must ride the caller's registered tray app, delivery must be
+// VISIBLE — add-ext-notification design reference section 2, O1=B ruling as
+// amended below):
+// 1. Scope binding still rides the registered tray icon: the bridge resolves
+//    the scope's live (HWND, uID) registration first, so `notification_tray_absent`
+//    and session/app ownership semantics are unchanged (the frozen O1=B
+//    routing half).
+// 2. DELIVERY is a WinRT toast posted under a per-app AUMID (the amended
+//    O1=B delivery half). Real-machine Windows 11 evidence (2026-09-23,
+//    build 26200): the legacy NIF_INFO balloon channel is untrustworthy —
+//    `dwInfoFlags=NIIF_NONE` balloons are dropped silently, and after the
+//    user opens the tray overflow flyout (the exact interaction required to
+//    reach a tray menu) even `NIIF_INFO` balloons stop presenting while
+//    `Shell_NotifyIconW` keeps returning TRUE. WinRT toasts with a
+//    registered AUMID presented correctly in every probed state (fresh
+//    boot, post-flyout, flyout-open). The AUMID is an attribution record in
+//    HKCU — no new window, no second tray icon channel; the "no new
+//    identity atom" wording of the original ruling is amended to permit
+//    exactly this registry record.
+// 3. Payload law unchanged: the facade preflight already enforced the frozen
+//    64/256/64 common-subset boundary and joined the win32 subtitle into
+//    the body; the bridge re-validates bounds (typed rejection, never
+//    truncation) and projects title/body verbatim into toast XML.
+// 4. Surface typed rejections with the family's error-code contract:
 //    `notification_tray_absent` when the scope has no registered icon
-//    channel and `notification_failed` (details carrying the win32 error
-//    code) when the native call returns FALSE.
-// 4. Keep every native dependency behind two injectable seams (channel
-//    source + notify-icon invoker) so the bridge is fully testable on any
-//    host and the win32 production adapters are thin, auditable shells.
-// 5. Reach the backend runtime through a typed, downcast-free side channel:
+//    channel and `notification_failed` (details carrying the failing
+//    HRESULT) when the platform rejects the toast.
+// 5. Keep every native dependency behind two injectable seams (channel
+//    source + toast invoker) so the bridge is fully testable on any host
+//    and the win32 production adapters are thin, auditable shells.
+// 6. Reach the backend runtime through a typed, downcast-free side channel:
 //    one Arc<NativeTrayIconRuntime> handle registered at broker construction
 //    is shared between the kernel's TrayIconBackend and the channel source —
 //    never a notification-specific method on the AppBackend trait.
 // Compromise: the bridge is broker composition (design law:
 // opentray-core stays product-neutral), so it cannot live beside the kernel
-// dispatch it bypasses; the neutral mirror of NOTIFYICONDATAW's NIF_INFO
-// projection is the price of darwin-runnable seam tests.
+// dispatch it bypasses; the neutral toast projection (owned strings + XML
+// builder) is the price of darwin-runnable seam tests.
 
 use opentray_spec::CommandScope;
 use serde_json::Value;
 
 use crate::host_capabilities::{HostCapabilityDispatch, HostCapabilityOutcome};
 
-/// Frozen payload boundary (design section 1): NOTIFYICONDATAW's physical
-/// szInfoTitle/szInfo capacities are the platform-independent contract, and
-/// the facade preflight has already truncated-at-boundary before the bridge
-/// sees the values.
+/// Frozen payload boundary (design section 1): the physical capacities that
+/// were NOTIFYICONDATAW's szInfoTitle/szInfo limits remain the
+/// platform-independent contract, and the facade preflight has already
+/// truncated-at-boundary before the bridge sees the values.
 pub(crate) const TITLE_CAPACITY_UTF16: usize = 64;
 pub(crate) const BODY_CAPACITY_UTF16: usize = 256;
-
-/// NOTIFYICONDATAW projection constants (winuser.h frozen values): only the
-/// NIF_INFO flag family is used; the deprecated uTimeout/uVersion balloon
-/// timing members stay zero because presentation timing is system policy.
-#[cfg(target_os = "windows")]
-pub(crate) const NIM_MODIFY: u32 = 0x1;
-pub(crate) const NIF_INFO: u32 = 0x10;
-pub(crate) const NIIF_NOSOUND: u32 = 0x2;
 
 /// Typed error codes frozen by the add-ext-notification shared schema
 /// (`NOTIFICATION_ERROR_CODES` in @opentray/spec).
@@ -59,28 +65,21 @@ pub(crate) struct TrayIconChannel {
     pub u_id: u32,
 }
 
-/// Neutral mirror of the NOTIFYICONDATAW fields the NIF_INFO projection
-/// sets. Fixed arrays carry the verbatim UTF-16 payloads so at-boundary
-/// values are observable byte-for-byte in seam tests on any host; the win32
-/// production invoker copies them into the real struct unchanged.
-///
-/// NUL law: the terminating NUL is written only when a slot remains — a
-/// value at the exact frozen boundary fills its array completely (design
-/// section 5: "UTF-16 boundary values fill exactly without overflow").
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TrayNotifyIconData {
-    pub hwnd: isize,
-    pub u_id: u32,
-    /// `uFlags`: always NIF_INFO for this bridge.
-    pub u_flags: u32,
-    pub sz_info_title: [u16; TITLE_CAPACITY_UTF16],
-    pub title_len: usize,
-    pub sz_info: [u16; BODY_CAPACITY_UTF16],
-    pub info_len: usize,
-    /// `dwInfoFlags`: NIIF_NOSOUND when silent, zero otherwise. Quiet-time
-    /// and large-icon flags are deliberately absent — presentation policy
-    /// belongs to the shell (documented degradation, design section 2).
-    pub dw_info_flags: u32,
+/// Neutral mirror of the win32 toast projection: the AUMID the toast is
+/// attributed to plus the verbatim title/body strings and the silent flag.
+/// Owned strings keep at-boundary values observable byte-for-byte in seam
+/// tests on any host; the win32 production invoker serializes them into
+/// toast XML unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ToastNotificationData {
+    /// Per-app AUMID the toast is posted under (derived from the command
+    /// scope's app id; the win32 adapter registers its attribution record
+    /// under HKCU before the first post).
+    pub aumid: String,
+    pub title: String,
+    /// An absent body is the documented empty-body toast, not an error.
+    pub body: String,
+    pub silent: bool,
 }
 
 /// Injectable tray-registry lookup: resolves the native registration channel
@@ -92,11 +91,12 @@ pub(crate) trait TrayNotificationChannelSource {
     fn channel_for(&self, scope: &CommandScope) -> Option<TrayIconChannel>;
 }
 
-/// Injectable Shell_NotifyIconW-shaped invoker: performs one NIM_MODIFY with
-/// the NIF_INFO payload on the calling (owner-loop) thread. `Err(code)` is
-/// the native win32 error code of a FALSE return.
-pub(crate) trait NotifyIconInvoker {
-    fn modify_info(&self, data: &TrayNotifyIconData) -> Result<(), u32>;
+/// Injectable WinRT-toast-shaped invoker: posts one toast under the AUMID on
+/// a dedicated MTA worker thread (the same apartment law the ext-webview
+/// WinRT calls established — never on a pump-blocking STA). `Err(hresult)`
+/// is the failing HRESULT of the platform call.
+pub(crate) trait ToastInvoker {
+    fn show_toast(&self, data: &ToastNotificationData) -> Result<(), u32>;
 }
 
 /// Scope→channel resolution core (host-neutral): the composition pre-dispatch
@@ -121,21 +121,21 @@ fn resolve_tray_channel(
 /// The bridge's composition-owned service pair.
 pub(crate) struct TrayNotificationSeam {
     channels: Box<dyn TrayNotificationChannelSource>,
-    invoker: Box<dyn NotifyIconInvoker>,
+    invoker: Box<dyn ToastInvoker>,
 }
 
 impl TrayNotificationSeam {
-    /// Production seam per platform. Win32 wires the real Shell_NotifyIconW
-    /// invoker plus the channel source that reads the shared tray-backend
-    /// runtime handle registered at broker construction; other platforms
-    /// register no routes, so their inert pair is never consulted.
+    /// Production seam per platform. Win32 wires the WinRT toast invoker plus
+    /// the channel source that reads the shared tray-backend runtime handle
+    /// registered at broker construction; other platforms register no routes,
+    /// so their inert pair is never consulted.
     #[cfg(target_os = "windows")]
     pub(crate) fn compose_native(
         tray_runtime: std::sync::Arc<opentray_backend_tray_icon::NativeTrayIconRuntime>,
     ) -> Self {
         Self {
             channels: Box::new(NativeTrayChannelSource { tray_runtime }),
-            invoker: Box::new(ShellNotifyIconInvoker),
+            invoker: Box::new(WinRtToastInvoker),
         }
     }
 
@@ -248,61 +248,84 @@ fn parse_notify_command(data: &Value) -> Result<NotifyCommand<'_>, HostCapabilit
     })
 }
 
-/// Copies UTF-16 code units verbatim into a fixed balloon field: all units
-/// up to the array capacity, then a NUL only if a slot remains. The typed
-/// bounds rejection in `parse_notify_command` enforces the frozen contract
-/// before any native call (implementation review I3b P1), so conforming
-/// values never lose a unit; this capacity clamp is pure buffer safety for
-/// a hypothetical future mismatch — never the truncation policy.
-fn fill_balloon_field(
-    field: &str,
-    buffer: &mut [u16],
-    value: &str,
-) -> usize {
-    let units: Vec<u16> = value.encode_utf16().collect();
-    if units.len() > buffer.len() {
-        eprintln!(
-            "opentray tray-notification: {field} carries {} UTF-16 units beyond the frozen \
-             {}-unit balloon capacity from a non-preflighted caller; clamping to capacity",
-            units.len(),
-            buffer.len(),
-        );
+/// XML-escapes one text node value for the toast payload (the win32
+/// XmlDocument loader rejects raw markup, and a hostile title must never
+/// inject toast schema — attribute-escaping rules also satisfy text nodes).
+fn xml_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&apos;"),
+            _ => escaped.push(ch),
+        }
     }
-    let filled = units.len().min(buffer.len());
-    buffer[..filled].copy_from_slice(&units[..filled]);
-    if filled < buffer.len() {
-        buffer[filled] = 0;
-    }
-    filled
+    escaped
 }
 
-/// Builds the NIF_INFO projection for one notify command against one
-/// registered channel.
-fn build_notify_icon_data(
-    channel: TrayIconChannel,
-    command: &NotifyCommand<'_>,
-) -> TrayNotifyIconData {
-    let mut data = TrayNotifyIconData {
-        hwnd: channel.hwnd,
-        u_id: channel.u_id,
-        u_flags: NIF_INFO,
-        sz_info_title: [0; TITLE_CAPACITY_UTF16],
-        title_len: 0,
-        sz_info: [0; BODY_CAPACITY_UTF16],
-        info_len: 0,
-        dw_info_flags: 0,
+/// Builds the toast XML for one projection: `ToastText02` (title + body) or
+/// `ToastText01` (title only when the body is absent), with
+/// `<audio silent="true"/>` for silent notifications.
+fn toast_xml(data: &ToastNotificationData) -> String {
+    let title = xml_escape(&data.title);
+    let audio = if data.silent {
+        "<audio silent=\"true\"/>"
+    } else {
+        ""
     };
-    data.title_len = fill_balloon_field("title", &mut data.sz_info_title, command.title);
-    // An absent body is the documented empty-string balloon, not an error.
-    data.info_len = fill_balloon_field(
-        "body",
-        &mut data.sz_info,
-        command.body.unwrap_or_default(),
-    );
-    if command.silent {
-        data.dw_info_flags = NIIF_NOSOUND;
+    if data.body.is_empty() {
+        format!(
+            "<toast><visual><binding template=\"ToastText01\"><text id=\"1\">{title}</text></binding></visual>{audio}</toast>"
+        )
+    } else {
+        let body = xml_escape(&data.body);
+        format!(
+            "<toast><visual><binding template=\"ToastText02\"><text id=\"1\">{title}</text><text id=\"2\">{body}</text></binding></visual>{audio}</toast>"
+        )
     }
-    data
+}
+
+/// Derives the per-app AUMID from the command scope's app id: AUMIDs are
+/// limited to 129 characters of `[A-Za-z0-9.\-_]`, so foreign characters are
+/// folded to `-` and the value is truncated at the limit. The projection is
+/// deterministic, so one app always toasts under the same identity.
+pub(crate) fn toast_aumid(app_id: &str) -> String {
+    let folded: String = app_id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '.' || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .take(129)
+        .collect();
+    if folded.is_empty() {
+        "opentray.app".to_string()
+    } else {
+        folded
+    }
+}
+
+/// Builds the toast projection for one notify command. The channel is the
+/// scope's registration gate (live tray icon required); the AUMID carries
+/// the app identity for attribution.
+fn build_toast_data(
+    _channel: TrayIconChannel,
+    scope: &CommandScope,
+    command: &NotifyCommand<'_>,
+) -> ToastNotificationData {
+    ToastNotificationData {
+        aumid: toast_aumid(&scope.app_id),
+        title: command.title.to_string(),
+        // An absent body is the documented empty-body toast, not an error.
+        body: command.body.unwrap_or_default().to_string(),
+        silent: command.silent,
+    }
 }
 
 /// The frozen void-operation result event of the clipboard/dialog/sound
@@ -314,8 +337,9 @@ fn notify_result_event() -> Value {
 }
 
 /// The registered tray-notification bridge handler (host-capability table
-/// entry for (notification, notify, win32)). Scope-bound channel resolution,
-/// verbatim NIF_INFO projection, immediate typed completion.
+/// entry for (notification, notify, win32)). Scope-bound channel resolution
+/// (the live-tray gate), verbatim toast projection, immediate typed
+/// completion.
 pub(crate) fn tray_notification_bridge(
     dispatch: &HostCapabilityDispatch<'_>,
 ) -> HostCapabilityOutcome {
@@ -333,16 +357,15 @@ pub(crate) fn tray_notification_bridge(
             details: None,
         };
     };
-    let projection = build_notify_icon_data(channel, &command);
-    if let Err(win32_error_code) = dispatch.tray_notification.invoker.modify_info(&projection) {
+    let projection = build_toast_data(channel, &dispatch.scope, &command);
+    if let Err(hresult) = dispatch.tray_notification.invoker.show_toast(&projection) {
         return HostCapabilityOutcome::Failed {
             code: NOTIFICATION_FAILED.to_string(),
             message: format!(
-                "Shell_NotifyIconW(NIM_MODIFY, NIF_INFO) failed for the tray icon channel of \
-                 app {} tray {}",
-                dispatch.scope.app_id, dispatch.scope.tray_id
+                "WinRT toast presentation failed for app {} tray {} under AUMID {}",
+                dispatch.scope.app_id, dispatch.scope.tray_id, projection.aumid
             ),
-            details: Some(serde_json::json!({ "win32ErrorCode": win32_error_code })),
+            details: Some(serde_json::json!({ "hresult": hresult })),
         };
     }
     HostCapabilityOutcome::Immediate(notify_result_event())
@@ -372,10 +395,10 @@ impl TrayNotificationChannelSource for InertChannelSource {
 struct InertInvoker;
 
 #[cfg(not(target_os = "windows"))]
-impl NotifyIconInvoker for InertInvoker {
-    fn modify_info(&self, _data: &TrayNotifyIconData) -> Result<(), u32> {
+impl ToastInvoker for InertInvoker {
+    fn show_toast(&self, _data: &ToastNotificationData) -> Result<(), u32> {
         eprintln!(
-            "opentray tray-notification: notify-icon invoker consulted on a platform with no \
+            "opentray tray-notification: toast invoker consulted on a platform with no \
              registered route; answering the typed failure path"
         );
         Err(0)
@@ -389,39 +412,175 @@ impl NotifyIconInvoker for InertInvoker {
 #[cfg(target_os = "windows")]
 mod native {
     use super::{
-        NotifyIconInvoker, TrayNotificationChannelSource, TrayIconChannel, TrayNotifyIconData,
-        resolve_tray_channel, NIF_INFO, NIM_MODIFY,
+        ToastInvoker, ToastNotificationData, TrayNotificationChannelSource, TrayIconChannel,
+        resolve_tray_channel, toast_xml,
     };
     use opentray_spec::CommandScope;
-    use windows_sys::Win32::Foundation::GetLastError;
-    use windows_sys::Win32::UI::Shell::{Shell_NotifyIconW, NOTIFYICONDATAW};
 
-    /// Real Shell_NotifyIconW adapter: one NIM_MODIFY carrying only the
-    /// NIF_INFO family, on the calling owner-loop thread (the same thread
-    /// law as tray registration). The deprecated uTimeout/uVersion members
-    /// stay zeroed — presentation timing is system policy.
-    pub(super) struct ShellNotifyIconInvoker;
+    /// Real WinRT toast adapter: a single long-lived worker thread owns the
+    /// process's toast MTA and drains an mpsc queue, so the bridge thread
+    /// only enqueues and returns immediately — no WinRT call, no join, no
+    /// transport-deadline risk. The apartment is initialized exactly once
+    /// and NEVER uninitialized: windows-core caches WinRT factory pointers
+    /// in process-wide statics, and tearing down the apartment that created
+    /// them leaves those caches dangling (the real-machine 0xC0000005 after
+    /// an idle period, symbolized at IGenericFactory::ActivateInstance on
+    /// the per-notify-thread design). `Err` is reserved for a closed worker
+    /// channel (worker died); presentation failures are logged by the
+    /// worker itself.
+    pub(super) struct WinRtToastInvoker;
 
-    impl NotifyIconInvoker for ShellNotifyIconInvoker {
-        fn modify_info(&self, data: &TrayNotifyIconData) -> Result<(), u32> {
-            debug_assert_eq!(data.u_flags, NIF_INFO);
-            let mut native: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
-            native.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as u32;
-            native.hWnd = data.hwnd as _;
-            native.uID = data.u_id;
-            native.uFlags = data.u_flags;
-            native.szInfo = data.sz_info;
-            native.szInfoTitle = data.sz_info_title;
-            native.dwInfoFlags = data.dw_info_flags;
-            // SAFETY: `native` is a fully initialized stack value whose
-            // pointers are null; Shell_NotifyIconW reads it synchronously.
-            let succeeded = unsafe { Shell_NotifyIconW(NIM_MODIFY, &native) };
-            if succeeded != 0 {
-                Ok(())
-            } else {
-                Err(unsafe { GetLastError() })
+    impl ToastInvoker for WinRtToastInvoker {
+        fn show_toast(&self, data: &ToastNotificationData) -> Result<(), u32> {
+            toast_worker_sender()
+                .send(data.clone())
+                .map_err(|_| {
+                    eprintln!(
+                        "opentray tray-notification: toast worker channel is closed; dropping \
+                         the notification"
+                    );
+                    0x8000FFFFu32 // E_UNEXPECTED: presentation can no longer happen
+                })
+        }
+    }
+
+    /// The process-wide toast worker handle (lazy, exactly one thread).
+    fn toast_worker_sender() -> &'static std::sync::mpsc::Sender<ToastNotificationData> {
+        use std::sync::OnceLock;
+        static SENDER: OnceLock<std::sync::mpsc::Sender<ToastNotificationData>> = OnceLock::new();
+        SENDER.get_or_init(|| {
+            let (sender, receiver) = std::sync::mpsc::channel::<ToastNotificationData>();
+            let spawned = std::thread::Builder::new()
+                .name("opentray-toast".to_string())
+                .spawn(move || toast_worker_loop(receiver));
+            if let Err(error) = spawned {
+                eprintln!(
+                    "opentray tray-notification: toast worker could not start: {error}; the \
+                     channel stays closed and every notify answers the typed failure"
+                );
+            }
+            sender
+        })
+    }
+
+    fn toast_worker_loop(receiver: std::sync::mpsc::Receiver<ToastNotificationData>) {
+        use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+        // MTA for the whole process lifetime — see WinRtToastInvoker. A
+        // worker that cannot get an apartment stays drained-but-inert so the
+        // channel surfaces a clean typed failure instead of a crash.
+        if let Err(error) = unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
+            if error.code().0 as u32 != 0x80010106 {
+                eprintln!(
+                    "opentray tray-notification: toast worker apartment init failed: {error}"
+                );
+                return;
             }
         }
+        while let Ok(data) = receiver.recv() {
+            if let Err(error) = post_toast(&data) {
+                eprintln!(
+                    "opentray tray-notification: toast presentation failed for AUMID {}: {error}",
+                    data.aumid
+                );
+            }
+        }
+    }
+
+    /// Registers the per-app AUMID attribution record under
+    /// HKCU\Software\Classes\AppUserModelId\<aumid> (DisplayName + Settings
+    /// visibility) once per process per app. This is the standard unpackaged
+    /// toast identity: no window, no tray icon, just attribution so the toast
+    /// carries the app's name and the user can find it in notification
+    /// settings. Failures are logged and non-fatal — Windows still presents
+    /// toasts under unregistered AUMIDs on current builds, and a read-only
+    /// profile must never break delivery.
+    fn ensure_aumid_registration(aumid: &str, display_name: &str) {
+        use std::collections::HashSet;
+        use std::sync::Mutex;
+        static REGISTERED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+        let mut guard = match REGISTERED.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let seen = guard.get_or_insert_with(HashSet::new);
+        if seen.contains(aumid) {
+            return;
+        }
+        if let Err(error) = write_aumid_record(aumid, display_name) {
+            eprintln!(
+                "opentray tray-notification: AUMID record for {aumid} could not be written \
+                 ({error}); presenting the toast without the Settings attribution"
+            );
+        }
+        seen.insert(aumid.to_string());
+    }
+
+    fn write_aumid_record(aumid: &str, display_name: &str) -> windows::core::Result<()> {
+        use windows::core::PCWSTR;
+        use windows::Win32::System::Registry::{
+            RegCloseKey, RegCreateKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE,
+            KEY_WOW64_64KEY, REG_OPTION_NON_VOLATILE, REG_SZ,
+        };
+        let subkey: Vec<u16> = format!("Software\\Classes\\AppUserModelId\\{aumid}")
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut hkey: HKEY = HKEY(std::ptr::null_mut());
+        let result = unsafe {
+            RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                PCWSTR(subkey.as_ptr()),
+                None,
+                PCWSTR::null(),
+                REG_OPTION_NON_VOLATILE,
+                KEY_SET_VALUE | KEY_WOW64_64KEY,
+                None,
+                &mut hkey,
+                None,
+            )
+        };
+        result.ok()?;
+        let wide_name: Vec<u16> = "DisplayName".encode_utf16().chain(std::iter::once(0)).collect();
+        let wide_value: Vec<u16> = display_name
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let bytes = unsafe {
+            std::slice::from_raw_parts(wide_value.as_ptr().cast::<u8>(), wide_value.len() * 2)
+        };
+        let outcome = unsafe {
+            RegSetValueExW(
+                hkey,
+                PCWSTR(wide_name.as_ptr()),
+                None,
+                REG_SZ,
+                Some(bytes),
+            )
+        }
+        .ok();
+        unsafe { RegCloseKey(hkey) };
+        outcome
+    }
+
+    /// One toast post on the long-lived worker thread (apartment already
+    /// owned by the loop). Presentation failures surface as `Err` and are
+    /// logged by the worker loop.
+    fn post_toast(data: &ToastNotificationData) -> windows::core::Result<()> {
+        use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
+
+        // The display name is the raw app id (the bridge has no richer name
+        // at this layer); the fold is deterministic and human-readable.
+        ensure_aumid_registration(&data.aumid, &data.aumid);
+
+        let xml = toast_xml(data);
+        let document = windows::Data::Xml::Dom::XmlDocument::new()?;
+        document.LoadXml(&windows::core::HSTRING::from(&xml))?;
+        let toast = ToastNotification::CreateToastNotification(&document)?;
+        let notifier = ToastNotificationManager::CreateToastNotifierWithId(
+            &windows::core::HSTRING::from(&data.aumid),
+        )?;
+        unsafe { notifier.Show(&toast)? };
+        Ok(())
     }
 
     /// Production win32 channel source: resolves the scope's tray icon through
@@ -448,7 +607,7 @@ mod native {
 }
 
 #[cfg(target_os = "windows")]
-use native::{NativeTrayChannelSource, ShellNotifyIconInvoker};
+use native::{NativeTrayChannelSource, WinRtToastInvoker};
 
 // ---------------------------------------------------------------------------
 // Darwin-runnable seam tests: routing selection, scope binding, typed
@@ -522,7 +681,7 @@ mod tests {
 
     #[derive(Clone)]
     struct SpyInvoker {
-        calls: Arc<Mutex<Vec<TrayNotifyIconData>>>,
+        calls: Arc<Mutex<Vec<ToastNotificationData>>>,
         result: Arc<Result<(), u32>>,
     }
 
@@ -548,9 +707,9 @@ mod tests {
         }
     }
 
-    impl NotifyIconInvoker for SpyInvoker {
-        fn modify_info(&self, data: &TrayNotifyIconData) -> Result<(), u32> {
-            self.calls.lock().expect("spy invoker lock").push(*data);
+    impl ToastInvoker for SpyInvoker {
+        fn show_toast(&self, data: &ToastNotificationData) -> Result<(), u32> {
+            self.calls.lock().expect("spy invoker lock").push(data.clone());
             *self.result
         }
     }
@@ -872,20 +1031,20 @@ mod tests {
             panic!("native FALSE must fail typed");
         };
         assert_eq!(code, NOTIFICATION_FAILED);
-        assert_eq!(details, Some(serde_json::json!({ "win32ErrorCode": 5 })));
+        assert_eq!(details, Some(serde_json::json!({ "hresult": 5 })));
     }
 
-    // -- NIF_INFO projection --------------------------------------------------
+    // -- Toast projection -------------------------------------------------------
 
     #[test]
-    fn success_projects_nif_info_with_verbatim_at_boundary_values() {
+    fn success_projects_the_toast_with_verbatim_at_boundary_values() {
         let channels = SpyChannels::default();
         channels.register(&scope("app-1", "tray-1", "session-1"), CHANNEL);
         let invoker = SpyInvoker::default();
         let service = seam(channels, invoker.clone());
 
         // Boundary values: a 64-unit title (astral-plane pairs) and a
-        // 256-unit body fill their arrays exactly, verbatim, no NUL slot.
+        // 256-unit body pass through verbatim — owned strings, no capacity.
         let title: String = "𝕏".repeat(TITLE_CAPACITY_UTF16 / 2);
         let body: String = "b".repeat(BODY_CAPACITY_UTF16);
         assert_eq!(title.encode_utf16().count(), TITLE_CAPACITY_UTF16);
@@ -904,24 +1063,16 @@ mod tests {
         let calls = invoker.calls.lock().expect("spy invoker lock");
         assert_eq!(calls.len(), 1);
         let data = &calls[0];
-        assert_eq!(data.hwnd, CHANNEL.hwnd);
-        assert_eq!(data.u_id, CHANNEL.u_id);
-        assert_eq!(data.u_flags, NIF_INFO);
-        assert_eq!(data.dw_info_flags, 0);
-        // Title: exactly the 64 verbatim code units, array exactly full.
-        assert_eq!(data.title_len, TITLE_CAPACITY_UTF16);
-        assert_eq!(
-            &data.sz_info_title[..data.title_len],
-            &title.encode_utf16().collect::<Vec<u16>>()[..]
-        );
-        // Body: exactly the 256 verbatim code units, array exactly full.
-        assert_eq!(data.info_len, BODY_CAPACITY_UTF16);
-        assert_eq!(
-            &data.sz_info[..data.info_len],
-            &body.encode_utf16().collect::<Vec<u16>>()[..]
-        );
-        // A below-boundary value keeps the NUL terminator inside the array.
+        assert_eq!(data.title, title);
+        assert_eq!(data.body, body);
+        assert!(!data.silent);
+        assert_eq!(data.aumid, "app-1");
+        let xml = toast_xml(data);
+        assert!(xml.contains("ToastText02"), "two-line template: {xml}");
+        assert!(!xml.contains("<audio"), "non-silent carries no audio element: {xml}");
         drop(calls);
+
+        // A below-boundary value stays verbatim too.
         let outcome = tray_notification_bridge(&dispatch(
             scope("app-1", "tray-1", "session-1"),
             &notify_payload("Short", Some("Body"), false),
@@ -930,15 +1081,36 @@ mod tests {
         assert!(matches!(outcome, HostCapabilityOutcome::Immediate(_)));
         let calls = invoker.calls.lock().expect("spy invoker lock");
         let data = &calls[1];
-        assert_eq!(&data.sz_info_title[..5], &"Short".encode_utf16().collect::<Vec<u16>>());
-        assert_eq!(data.sz_info_title[5], 0);
-        assert_eq!(&data.sz_info[..4], &"Body".encode_utf16().collect::<Vec<u16>>());
-        assert_eq!(data.sz_info[4], 0);
-        assert_eq!(data.dw_info_flags, 0);
+        assert_eq!(data.title, "Short");
+        assert_eq!(data.body, "Body");
+        assert_eq!(toast_xml(data), "<toast><visual><binding template=\"ToastText02\"><text id=\"1\">Short</text><text id=\"2\">Body</text></binding></visual></toast>");
     }
 
     #[test]
-    fn silent_projects_niif_nosound_and_absent_body_is_empty() {
+    fn toast_xml_escapes_markup_in_text_values() {
+        let data = ToastNotificationData {
+            aumid: "app-1".to_string(),
+            title: "a<b>&\"c\"".to_string(),
+            body: "<script>&'</script>".to_string(),
+            silent: false,
+        };
+        let xml = toast_xml(&data);
+        assert!(xml.contains("a&lt;b&gt;&amp;&quot;c&quot;"), "{xml}");
+        assert!(xml.contains("&lt;script&gt;&amp;&apos;&lt;/script&gt;"), "{xml}");
+        assert!(!xml.contains("<script>"), "raw markup must never reach the toast XML");
+    }
+
+    #[test]
+    fn toast_aumid_folds_foreign_characters_and_caps_length() {
+        assert_eq!(toast_aumid("com.example.opentray.notify-repro"), "com.example.opentray.notify-repro");
+        assert_eq!(toast_aumid("app with spaces/and:colons"), "app-with-spaces-and-colons");
+        assert_eq!(toast_aumid("").len(), "opentray.app".len());
+        let long = "a".repeat(400);
+        assert_eq!(toast_aumid(&long).len(), 129);
+    }
+
+    #[test]
+    fn silent_projects_the_muted_audio_element_and_absent_body_uses_the_one_line_template() {
         let channels = SpyChannels::default();
         channels.register(&scope("app-1", "tray-1", "session-1"), CHANNEL);
         let invoker = SpyInvoker::default();
@@ -953,9 +1125,11 @@ mod tests {
         let calls = invoker.calls.lock().expect("spy invoker lock");
         assert_eq!(calls.len(), 1);
         let data = &calls[0];
-        assert_eq!(data.dw_info_flags, NIIF_NOSOUND);
-        assert_eq!(data.info_len, 0);
-        assert_eq!(data.sz_info[0], 0);
+        assert!(data.silent);
+        assert_eq!(data.body, "");
+        let xml = toast_xml(data);
+        assert!(xml.contains("ToastText01"), "absent body uses the one-line template: {xml}");
+        assert!(xml.contains("<audio silent=\"true\"/>"), "{xml}");
     }
 
     // -- Composition pre-dispatch ---------------------------------------------
