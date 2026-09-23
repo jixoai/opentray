@@ -5,10 +5,12 @@
 // 2. Keep the deterministic-bug leg in the same gate: budget exhaustion
 //    degrades to fail-fast + `abandoned`, never a hang, never a loop.
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { accessSync, constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeAll, afterAll, describe, expect, it } from "vitest";
 
@@ -35,10 +37,13 @@ import type { ServerFrame } from "@opentray/spec";
  * re-enables the kill leg.
  */
 const resolveDrillBrokerBinary = (): string | undefined => {
+  // Cargo names Windows outputs `opentray.exe`; without the suffix the kill
+  // leg silently never resolves a binary on win32.
+  const exeSuffix = process.platform === "win32" ? ".exe" : "";
   const candidates = [
     process.env.OPENTRAY_DRILL_BROKER_BIN,
-    resolve(__dirname, "../../../target/debug/opentray"),
-    resolve(__dirname, "../../../target/release/opentray"),
+    resolve(__dirname, `../../../target/debug/opentray${exeSuffix}`),
+    resolve(__dirname, `../../../target/release/opentray${exeSuffix}`),
   ].filter((candidate): candidate is string => typeof candidate === "string");
   for (const candidate of candidates) {
     try {
@@ -223,6 +228,144 @@ describe("transport robustness drill (W8 permanent gate)", () => {
       );
     },
     90_000,
+  );
+
+  (drillBinary === undefined ? it.skip : it)(
+    "a bare consumer process with no loop holder of its own survives the recovery window",
+    async () => {
+      const { appId, appName } = drillAppIdentity();
+      const packageVersion = await cliPackageVersion();
+      const paths = resolveDaemonPaths({
+        homeDir: homeDir as string,
+        packageVersion,
+        callerLabel: resolveCallerLabel({ appId }),
+        appId,
+        appName,
+      });
+      drillPidFile = paths.pidFile;
+      // A prior leg's afterEach removed the shared home; this leg's child
+      // script (and its broker home) need it back.
+      await mkdir(homeDir as string, { recursive: true });
+
+      // The regression specimen (real-machine Windows evidence 2026-09-22):
+      // a bare bun process whose ONLY loop holder is the supervised broker
+      // connection. Every supervision timer is unref'd, so before the
+      // keepalive fix this process drained its event loop during the
+      // death→reconnect window and exited cleanly mid-recovery.
+      const sdkUrl = pathToFileURL(resolve(__dirname, "./sdk.ts")).href;
+      const childScript = join(homeDir as string, "bare-child.ts");
+      await writeFile(
+        childScript,
+        `import { createTray } from ${JSON.stringify(sdkUrl)};
+
+const tray = await createTray(
+  {
+    id: "drill-bare-child",
+    tooltip: { title: "bare child drill", description: "W8 bare child leg" },
+  },
+  {
+    homeDir: process.env.DRILL_HOME,
+    appId: process.env.DRILL_APP_ID,
+    appName: "OpenTray Drill",
+  },
+);
+tray.onTransportStateChange?.((state) => {
+  console.log(\`state=\${state}\`);
+  if (state === "healthy") {
+    console.log("recovered");
+    void tray.destroy().then(
+      () => process.exit(0),
+      () => process.exit(1),
+    );
+  }
+});
+console.log("ready");
+// No timers, no servers, no stdin reads: the supervised connection is the
+// only thing allowed to keep this process alive through the kill.
+`,
+        "utf8",
+      );
+
+      const child = spawn("bun", [childScript], {
+        cwd: __dirname,
+        env: {
+          ...process.env,
+          DRILL_HOME: homeDir,
+          DRILL_APP_ID: appId,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const lines: string[] = [];
+      let childExit: number | undefined;
+      let childExited = false;
+      let spawnError: string | undefined;
+      child.stdout.on("data", (chunk: Buffer) => {
+        for (const line of chunk.toString("utf8").split(/\r?\n/)) {
+          if (line.length > 0) {
+            lines.push(line);
+          }
+        }
+      });
+      child.stderr.on("data", (chunk: Buffer) => {
+        process.stderr.write(`[bare-child] ${chunk.toString("utf8")}`);
+      });
+      child.on("error", (error: Error) => {
+        spawnError = String(error);
+        childExited = true;
+        childExit = -2;
+      });
+      child.on("exit", (code) => {
+        childExited = true;
+        childExit = code ?? -1;
+      });
+
+      try {
+        await waitFor(
+          30_000,
+          () => lines.includes("ready") || spawnError !== undefined,
+          "bare child ready",
+        );
+        expect(spawnError).toBeUndefined();
+        // Aliveness before the kill: the hold must exist from connect on.
+        await new Promise((resolveSleep) => {
+          setTimeout(resolveSleep, 1_200);
+        });
+        expect(childExited).toBe(false);
+
+        brokerPid = await readPidFile(paths.pidFile);
+        expect(brokerPid).toBeDefined();
+        process.kill(brokerPid as number, "SIGKILL");
+
+        await waitFor(
+          15_000,
+          () => lines.includes("state=recovering"),
+          "child-observed recovering state",
+        );
+        // THE regression assertion: the bare process must still be alive
+        // inside the death→reconnect window, held only by supervision.
+        expect(childExited).toBe(false);
+        await waitFor(
+          45_000,
+          () => lines.includes("recovered"),
+          "child-observed healthy recovery inside the same bare process",
+        );
+        await waitFor(
+          15_000,
+          () => childExited && childExit === 0,
+          "bare child clean exit after recovery",
+        );
+      } finally {
+        if (!childExited) {
+          child.kill();
+          await new Promise((resolveKill) => {
+            child.once("exit", resolveKill);
+            const killBudget = setTimeout(resolveKill, 5_000);
+            killBudget.unref();
+          });
+        }
+      }
+    },
+    120_000,
   );
 
   it(

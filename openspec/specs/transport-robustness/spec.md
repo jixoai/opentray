@@ -133,6 +133,16 @@ WebView pages SHALL reload from their URL on recovery; this is contract, not
 implementation detail. The lost-events window between death and snapshot
 re-emit is acknowledged, and the snapshot re-emit is the resync guarantee.
 
+While the supervised runtime is alive (states `healthy` and `recovering`),
+the runtime SHALL hold the host process's event loop open across the
+death→reconnect window, including for a minimal consumer whose only loop
+holder is the broker connection itself (real-machine Windows evidence
+2026-09-22: with every supervision timer unref'd, a bare consumer process
+exited cleanly mid-recovery — silent death). The hold SHALL release at the
+terminal `abandoned` state, on caller-initiated teardown, and on terminal
+death with recovery disabled, so an explicitly dead runtime never zombies
+the host process.
+
 #### Scenario: Broker kill -9 recovers automatically
 
 - **GIVEN** a consumer app using only `createTray` and extension `attach`
@@ -143,6 +153,15 @@ re-emit is acknowledged, and the snapshot re-emit is the resync guarantee.
 - **AND** no consumer promise remains unsettled
 - **AND** the failure mode observed by the user is bounded (a flicker or an
   explicit dead state), never silence.
+
+#### Scenario: A bare consumer process survives the recovery window
+
+- **GIVEN** a consumer process with no timers, servers, or stdio reads of
+  its own — the supervised connection is its only loop holder
+- **WHEN** the broker is killed and supervision enters `recovering`
+- **THEN** the same process observes `recovering` followed by `healthy`
+  (it did not drain its event loop mid-recovery)
+- **AND** it tears down cleanly through its own `destroy()` afterwards.
 
 #### Scenario: Declarative state is fully replayed
 

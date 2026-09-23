@@ -1,0 +1,5 @@
+---
+"opentray": patch
+---
+
+Transport robustness liveness fix (real-machine Windows evidence 2026-09-22): a supervised runtime now holds the host process's event loop open across the broker death→reconnect window. Every supervision timer is deliberately unref'd, so a minimal consumer whose only loop holder is the broker connection drained its event loop during recovery and exited cleanly mid-recovery — silent death, breaking the zero-config survival the drill advertises (the in-vitest drill never saw it because the test runner holds the loop). The hold is released at the terminal `abandoned` state, on caller-initiated teardown, and on terminal death with recovery disabled, so an explicitly dead runtime never zombies the host. The drill gains a permanent bare-child-process leg that asserts the same process observes `recovering` followed by `healthy` with no loop holder of its own; the drill's broker binary resolution also now includes the Windows `opentray.exe` cargo output, which un-skips the kill leg on real Windows machines.

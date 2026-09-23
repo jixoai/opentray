@@ -269,6 +269,18 @@ export class SupervisedLocalBrokerConnection {
    */
   private teardownEpoch = 0;
   private shutdownPromise: Promise<void> | undefined;
+  /**
+   * Ref'd keepalive held while the supervised runtime is alive (healthy or
+   * recovering). Every supervision timer is deliberately unref'd (library
+   * semantics), so a minimal consumer whose only loop holder is the broker
+   * connection drains its event loop during the death→reconnect window and
+   * exits cleanly mid-recovery (real-machine Windows evidence 2026-09-22) —
+   * silent death, the outcome the transport law forbids. Released at the
+   * terminal `abandoned` state, on caller teardown, and on terminal death
+   * with recovery disabled, so an explicitly dead runtime never zombies
+   * the host process.
+   */
+  private keepAliveTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
     private readonly connectFactory: () => Promise<LocalBrokerClient>,
@@ -335,6 +347,7 @@ export class SupervisedLocalBrokerConnection {
     this.lastSettledAt = Date.now();
     this.consecutiveHeartbeatFailures = 0;
     this.startHeartbeat();
+    this.holdProcessAlive();
   }
 
   /**
@@ -435,6 +448,7 @@ export class SupervisedLocalBrokerConnection {
     this.teardownEpoch += 1;
     this.shutdownPromise ??= (async () => {
       this.stopHeartbeat();
+      this.releaseProcessHold();
       this.unwireGeneration();
       this.unwireGeneration = noop;
       const connection = this.connection;
@@ -466,6 +480,18 @@ export class SupervisedLocalBrokerConnection {
     if (this.heartbeatTimer !== undefined) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
+    }
+  }
+
+  /** Idempotent: the supervised runtime being alive is the whole condition. */
+  private holdProcessAlive(): void {
+    this.keepAliveTimer ??= setInterval(noop, 60_000);
+  }
+
+  private releaseProcessHold(): void {
+    if (this.keepAliveTimer !== undefined) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = undefined;
     }
   }
 
@@ -624,7 +650,10 @@ export class SupervisedLocalBrokerConnection {
     }
     if (!this.recoveryEnabled) {
       // Tier-off: declared death stays terminal per connection (today's
-      // behavior + heartbeat); no state transitions, no respawn.
+      // behavior + heartbeat); no state transitions, no respawn. The
+      // terminal death also releases the process hold — a recovery-off
+      // runtime must not zombie the host after its connection died.
+      this.releaseProcessHold();
       return;
     }
     void this.runRecovery();
@@ -806,6 +835,7 @@ export class SupervisedLocalBrokerConnection {
     }
     this.consecutiveHeartbeatFailures = 0;
     this.noteSuccessfulSettlement();
+    this.holdProcessAlive();
   }
 
   /**
@@ -940,8 +970,10 @@ export class SupervisedLocalBrokerConnection {
     }
     this.state = state;
     if (state === "abandoned") {
-      // Terminal: no heartbeat is ever useful again.
+      // Terminal: no heartbeat is ever useful again, and an explicitly dead
+      // runtime no longer holds the host process.
       this.stopHeartbeat();
+      this.releaseProcessHold();
     }
     for (const listener of [...this.stateListeners]) {
       try {
