@@ -1292,7 +1292,69 @@ mod probe {
     // Run
     // ------------------------------------------------------------------
 
+    /// TEMPORARY diagnostic (2026-09-23 picker SIGSEGV hunt): a vectored
+    /// exception handler that prints the faulting module+offset for an
+    /// access violation before the default termination. Revert with the
+    /// rest of the diagnostic instrumentation once the defect is closed.
+    unsafe extern "system" fn fault_tracer(
+        info: *mut windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_POINTERS,
+    ) -> i32 {
+        const EXCEPTION_CONTINUE_SEARCH: i32 = 0;
+        const EXCEPTION_ACCESS_VIOLATION: i32 = 0xC000_0005u32 as i32;
+        unsafe {
+            let record = (*info).ExceptionRecord;
+            if (*record).ExceptionCode != EXCEPTION_ACCESS_VIOLATION {
+                return EXCEPTION_CONTINUE_SEARCH;
+            }
+            let address = (*record).ExceptionAddress;
+            let mut module: windows_sys::Win32::Foundation::HMODULE = std::ptr::null_mut();
+            const FROM_ADDRESS_UNCHANGED: u32 = 0x0000_0004 | 0x0000_0002;
+            let resolved = windows_sys::Win32::System::LibraryLoader::GetModuleHandleExW(
+                FROM_ADDRESS_UNCHANGED,
+                address.cast(),
+                &mut module,
+            );
+            if resolved != 0 && !module.is_null() {
+                let mut path = [0u16; 512];
+                let len =
+                    windows_sys::Win32::System::LibraryLoader::GetModuleFileNameW(
+                        module,
+                        path.as_mut_ptr(),
+                        path.len() as u32,
+                    ) as usize;
+                let name = String::from_utf16_lossy(&path[..len.min(path.len())]);
+                let mut modinfo =
+                    windows_sys::Win32::System::ProcessStatus::MODULEINFO::default();
+                windows_sys::Win32::System::ProcessStatus::GetModuleInformation(
+                    windows_sys::Win32::System::Threading::GetCurrentProcess(),
+                    module,
+                    &mut modinfo,
+                    std::mem::size_of::<
+                        windows_sys::Win32::System::ProcessStatus::MODULEINFO,
+                    >() as u32,
+                );
+                eprintln!(
+                    "FAULT-TRACE: AV at {:#x} in {} (base {:#x}, offset {:#x}), thread {}",
+                    address as usize,
+                    name,
+                    modinfo.lpBaseOfDll as usize,
+                    (address as usize).wrapping_sub(modinfo.lpBaseOfDll as usize),
+                    windows_sys::Win32::System::Threading::GetCurrentThreadId(),
+                );
+            } else {
+                eprintln!("FAULT-TRACE: AV at {:#x} (module unresolved)", address as usize);
+            }
+        }
+        EXCEPTION_CONTINUE_SEARCH
+    }
+
     pub fn run() -> i32 {
+        unsafe {
+            windows_sys::Win32::System::Diagnostics::Debug::AddVectoredExceptionHandler(
+                1,
+                Some(fault_tracer),
+            );
+        };
         let _ = std::fs::create_dir_all(evidence_path().parent().expect("temp dir parent"));
         let _ = RUN_START.set(Instant::now());
         if let Ok(watchdog) = std::thread::Builder::new()

@@ -121,6 +121,7 @@ pub(super) fn show_task_dialog(
         hwnd_parent: std::ptr::null_mut(),
         h_instance: std::ptr::null_mut(),
         dw_flags: flags,
+        dw_common_buttons: 0,
         psz_window_title: std::ptr::null(),
         main_icon: match options.severity {
             DialogSeverity::Info => TD_INFORMATION_ICON,

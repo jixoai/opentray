@@ -25,6 +25,9 @@ use std::sync::OnceLock;
 
 use windows_sys::Win32::Foundation::HMODULE;
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows_sys::Win32::UI::Controls::{
+    ICC_STANDARD_CLASSES, ICC_WIN95_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx,
+};
 
 use super::ffi::TaskDialogIndirectFn;
 
@@ -93,6 +96,21 @@ fn probe_once() -> Option<TaskDialogSurface> {
         unsafe extern "system" fn() -> isize,
         TaskDialogIndirectFn,
     >(untyped) };
+    // A v6 resolution still cannot present anything until the common
+    // controls are initialized once for the process: without an
+    // InitCommonControlsEx call the v6 TaskDialogIndirect fails with
+    // E_INVALIDARG before creating anything (real-machine Windows
+    // evidence 2026-09-22: every broker message dialog failed with
+    // 0x80070057 even with a valid manifest and a valid config). The init
+    // shares the probe's once-per-process, never-undone semantics.
+    let icc = INITCOMMONCONTROLSEX {
+        dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
+        dwICC: ICC_STANDARD_CLASSES | ICC_WIN95_CLASSES,
+    };
+    // SAFETY: the struct is a stack value matching the frozen Win32 type.
+    if unsafe { InitCommonControlsEx(&icc) } == 0 {
+        return None;
+    }
     Some(TaskDialogSurface { entry })
 }
 

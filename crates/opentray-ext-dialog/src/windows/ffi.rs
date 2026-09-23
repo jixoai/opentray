@@ -35,9 +35,9 @@ pub(crate) const HRESULT_ERROR_CANCELLED: HRESULT = 0x8007_04C7_u32 as i32;
 // TaskDialog ABI (frozen Win32 layout; comctl32 v6)
 // ---------------------------------------------------------------------------
 
-/// `TASKDIALOG_BUTTON`. For command links the text may contain a `\n`
-/// separating the bold heading from the note line.
-#[repr(C)]
+/// `TASKDIALOG_BUTTON` — packed(1) with the TaskDialog family (`pshpack1.h`
+/// in `commctrl.h`): 12 bytes on x64, the pointer at offset 4 is unaligned.
+#[repr(C, packed(1))]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TaskDialogButton {
     pub(crate) n_button_id: i32,
@@ -55,20 +55,32 @@ pub(crate) type TaskDialogCallback = unsafe extern "system" fn(
 ) -> HRESULT;
 
 /// `TASKDIALOGCONFIG` (frozen layout, exact `commctrl.h` field order:
-/// cbSize, hwndParent, hInstance, dwFlags, pszWindowTitle, main-icon union,
-/// pszMainInstruction, pszContent, buttons, radio buttons,
+/// cbSize, hwndParent, hInstance, dwFlags, dwCommonButtons, pszWindowTitle,
+/// main-icon union, pszMainInstruction, pszContent, buttons, radio buttons,
 /// pszVerificationText, pszExpandedInformation, pszExpandedControlText,
 /// pszCollapsedControlText, footer-icon union, pszFooter, pfCallback,
-/// lpCallbackData, cxWidth). The two C unions are single `PCWSTR` slots
-/// here: the icon forms are `MAKEINTRESOURCEW` sentinels, which is exactly
-/// the pointer encoding the union's `pszMainIcon` arm uses; no HICON path
-/// exists in this extension.
-#[repr(C)]
+/// lpCallbackData, cxWidth). `commctrl.h` wraps the TaskDialog family in
+/// `#include <pshpack1.h>`: the real ABI is **packed(1)** — pointer fields
+/// sit at unaligned offsets and x64 `cbSize` is 88, not the naturally
+/// aligned 96. `TaskDialogIndirect` validates `cbSize` against its own
+/// layout and rejects a mismatched config with E_INVALIDARG before
+/// creating anything (real-machine Windows evidence 2026-09-22: the
+/// naturally aligned, `dwCommonButtons`-less form failed every broker
+/// message dialog with 0x80070057; a manifest-less probe host had only
+/// ever exercised the MessageBox fallback, which builds no config). The
+/// two C unions are single `PCWSTR` slots here: the icon forms are
+/// `MAKEINTRESOURCEW` sentinels, which is exactly the pointer encoding the
+/// union's `pszMainIcon` arm uses; no HICON path exists in this extension.
+#[repr(C, packed(1))]
 pub(crate) struct TaskDialogConfig {
     pub(crate) cb_size: u32,
     pub(crate) hwnd_parent: HWND,
     pub(crate) h_instance: HINSTANCE,
     pub(crate) dw_flags: u32,
+    /// `TASKDIALOG_COMMON_BUTTON_FLAGS`: always 0 — this extension uses
+    /// custom buttons exclusively. The field exists in the real ABI and its
+    /// omission shifted every later field and corrupted `cbSize`.
+    pub(crate) dw_common_buttons: u32,
     pub(crate) psz_window_title: PCWSTR,
     /// Union slot: `MAKEINTRESOURCEW` icon sentinel or a null pointer.
     pub(crate) main_icon: PCWSTR,
@@ -115,10 +127,18 @@ pub(crate) const TDF_SIZE_TO_CONTENT: u32 = 0x0100_0000;
 // TaskDialog notifications (frozen).
 pub(crate) const TDN_CREATED: u32 = 0;
 
-// Standard TaskDialog icon sentinels (`MAKEINTRESOURCEW`).
-pub(crate) const TD_WARNING_ICON: PCWSTR = (-1isize) as usize as PCWSTR;
-pub(crate) const TD_ERROR_ICON: PCWSTR = (-2isize) as usize as PCWSTR;
-pub(crate) const TD_INFORMATION_ICON: PCWSTR = (-3isize) as usize as PCWSTR;
+// Standard TaskDialog icon sentinels. Win32 defines these through
+// `MAKEINTRESOURCEW`, whose cast truncates to a WORD before widening —
+// `MAKEINTRESOURCEW(-3)` is the pointer `0xFFFD`, NOT the sign-extended
+// `0xFFFFFFFFFFFFFFFD`. TaskDialogIndirect validates the icon against the
+// int-resource range and rejects the sign-extended form with E_INVALIDARG
+// before creating anything (real-machine Windows evidence 2026-09-22: every
+// broker message dialog failed with 0x80070057 because a manifest-less
+// probe had only ever exercised the MessageBox fallback, which takes no
+// icon sentinels).
+pub(crate) const TD_WARNING_ICON: PCWSTR = 0xFFFFusize as PCWSTR;
+pub(crate) const TD_ERROR_ICON: PCWSTR = 0xFFFEusize as PCWSTR;
+pub(crate) const TD_INFORMATION_ICON: PCWSTR = 0xFFFDusize as PCWSTR;
 
 // Common button return values (shared with MessageBox; frozen Win32). The
 // full set is the frozen mapping table; the current recipes read IDCANCEL
@@ -187,62 +207,71 @@ mod tests {
     use super::*;
     use std::mem::{offset_of, size_of};
 
-    /// Freezes the TASKDIALOGCONFIG C layout: pointer-aligned u32/ptr
-    /// interleaving exactly as the Win32 header declares. Any drift is an
-    /// ABI break caught here instead of by stack corruption on a user
-    /// machine.
+    /// Freezes the TASKDIALOGCONFIG C layout against windows-sys's own
+    /// metadata-derived declaration: `commctrl.h` wraps the TaskDialog
+    /// family in `pshpack1.h`, so the real ABI is packed(1) with the
+    /// `dwCommonButtons` field present. Any drift is an ABI break caught
+    /// here instead of as E_INVALIDARG on a user machine (the historical
+    /// failure: a naturally aligned, `dwCommonButtons`-less form had both
+    /// wrong offsets and a `cbSize` TaskDialogIndirect rejects).
     #[test]
     fn task_dialog_config_layout_is_frozen() {
-        const P: usize = size_of::<usize>(); // pointer word
         assert_eq!(
             size_of::<TaskDialogConfig>(),
-            4 + 4 /* cbSize + pad */
-                + P /* hwndParent */
-                + P /* hInstance */
-                + 4 + 4 /* dwFlags + pad */
-                + P /* pszWindowTitle */
-                + P /* main icon union slot */
-                + P /* pszMainInstruction */
-                + P /* pszContent */
-                + 4 /* cButtons */
-                + 4 /* padding to the buttons pointer */
-                + P /* pButtons */
-                + 4 /* nDefaultButton */
-                + 4 /* cRadioButtons */
-                + P /* pRadioButtons (88: already pointer-aligned, no pad) */
-                + 4 /* nDefaultRadioButton */
-                + 4 /* padding to the verification pointer */
-                + P /* pszVerificationText */
-                + P /* pszExpandedInformation */
-                + P /* pszExpandedControlText */
-                + P /* pszCollapsedControlText */
-                + P /* footer icon union slot */
-                + P /* pszFooter */
-                + P /* pfCallback (Option<fn> keeps the pointer niche) */
-                + P /* lpCallbackData */
-                + 4 /* cxWidth */
-                + 4, // tail padding to pointer alignment
-            "TASKDIALOGCONFIG must keep the frozen Win32 layout"
+            size_of::<::windows_sys::Win32::UI::Controls::TASKDIALOGCONFIG>(),
+            "TASKDIALOGCONFIG must keep the frozen packed(1) Win32 layout"
         );
+        assert_eq!(
+            size_of::<TaskDialogButton>(),
+            size_of::<::windows_sys::Win32::UI::Controls::TASKDIALOG_BUTTON>(),
+            "TASKDIALOG_BUTTON must keep the frozen packed(1) Win32 layout"
+        );
+        // Packed(1) anchors: handles sit directly after cbSize with no pad,
+        // and every later field matches the windows-sys offsets exactly.
         assert_eq!(offset_of!(TaskDialogConfig, cb_size), 0);
-        assert_eq!(offset_of!(TaskDialogConfig, hwnd_parent), 8);
-        assert_eq!(offset_of!(TaskDialogConfig, dw_flags), 24);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_window_title), 32);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_main_instruction), 48);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_content), 56);
-        assert_eq!(offset_of!(TaskDialogConfig, c_buttons), 64);
-        assert_eq!(offset_of!(TaskDialogConfig, p_buttons), 72);
-        assert_eq!(offset_of!(TaskDialogConfig, p_radio_buttons), 88);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_verification_text), 104);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_expanded_information), 112);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_collapsed_control_text), 128);
-        assert_eq!(offset_of!(TaskDialogConfig, footer_icon), 136);
-        assert_eq!(offset_of!(TaskDialogConfig, psz_footer), 144);
-        assert_eq!(offset_of!(TaskDialogConfig, pf_callback), 152);
-        assert_eq!(offset_of!(TaskDialogConfig, lp_callback_data), 160);
-        assert_eq!(offset_of!(TaskDialogConfig, cx_width), 168);
-        // TASKDIALOG_BUTTON: i32 + alignment padding + pointer.
-        assert_eq!(size_of::<TaskDialogButton>(), 4 + 4 + 8);
+        assert_eq!(offset_of!(TaskDialogConfig, hwnd_parent), 4);
+        assert_eq!(
+            offset_of!(TaskDialogConfig, psz_window_title),
+            offset_of!(
+                ::windows_sys::Win32::UI::Controls::TASKDIALOGCONFIG,
+                pszWindowTitle
+            )
+        );
+        assert_eq!(
+            offset_of!(TaskDialogConfig, main_icon),
+            offset_of!(
+                ::windows_sys::Win32::UI::Controls::TASKDIALOGCONFIG,
+                Anonymous1
+            )
+        );
+        assert_eq!(
+            offset_of!(TaskDialogConfig, psz_main_instruction),
+            offset_of!(
+                ::windows_sys::Win32::UI::Controls::TASKDIALOGCONFIG,
+                pszMainInstruction
+            )
+        );
+        assert_eq!(
+            offset_of!(TaskDialogConfig, p_buttons),
+            offset_of!(
+                ::windows_sys::Win32::UI::Controls::TASKDIALOGCONFIG,
+                pButtons
+            )
+        );
+        assert_eq!(
+            offset_of!(TaskDialogConfig, pf_callback),
+            offset_of!(
+                ::windows_sys::Win32::UI::Controls::TASKDIALOGCONFIG,
+                pfCallback
+            )
+        );
+        assert_eq!(
+            offset_of!(TaskDialogConfig, cx_width),
+            offset_of!(
+                ::windows_sys::Win32::UI::Controls::TASKDIALOGCONFIG,
+                cxWidth
+            )
+        );
     }
 
     #[test]
@@ -257,10 +286,12 @@ mod tests {
         assert_eq!(IDYES, 6);
         assert_eq!(IDNO, 7);
         assert_eq!(WM_APP_DIALOG_CLOSE, 0x8000);
-        // The icon sentinels are the MAKEINTRESOURCEW(-1/-2/-3) encodings.
-        assert_eq!(TD_WARNING_ICON as isize, -1);
-        assert_eq!(TD_ERROR_ICON as isize, -2);
-        assert_eq!(TD_INFORMATION_ICON as isize, -3);
+        // The icon sentinels are the MAKEINTRESOURCEW(-1/-2/-3) encodings:
+        // WORD-truncated (0xFFFF/0xFFFE/0xFFFD), never sign-extended —
+        // TaskDialogIndirect rejects the sign-extended form (E_INVALIDARG).
+        assert_eq!(TD_WARNING_ICON as usize, 0xFFFF);
+        assert_eq!(TD_ERROR_ICON as usize, 0xFFFE);
+        assert_eq!(TD_INFORMATION_ICON as usize, 0xFFFD);
         assert_eq!(HRESULT_ERROR_CANCELLED, 0x8007_04C7_u32 as i32);
     }
 

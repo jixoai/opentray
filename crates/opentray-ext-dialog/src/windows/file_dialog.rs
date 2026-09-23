@@ -33,12 +33,18 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::{
-    FileOpenDialog, FileSaveDialog, IFileDialog, IFileOpenDialog, IFileSaveDialog, IModalWindow,
-    IShellItem, IShellItemArray, SHCreateItemFromParsingName, FILEOPENDIALOGOPTIONS,
+    FileOpenDialog, FileSaveDialog, IFileDialog, IFileOpenDialog, IFileSaveDialog, IShellItem,
+    IShellItemArray, SHCreateItemFromParsingName, FILEOPENDIALOGOPTIONS,
     FOS_ALLOWMULTISELECT, FOS_DONTADDTORECENT, FOS_FILEMUSTEXIST, FOS_NOCHANGEDIR,
     FOS_OVERWRITEPROMPT, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FOS_STRICTFILETYPES,
     SIGDN_FILESYSPATH,
 };
+// IModalWindow is deliberately absent from the import list: calling Show
+// through an IModalWindow interface pointer crashes deterministically at
+// comdlg32+0x777c8 on real Windows desktops (15/15 matrix, 2026-09-23 —
+// the ABI-identical call dispatched through the IFileDialog pointer
+// presents 5/5; rfd, the Rust ecosystem standard, also calls Show through
+// the file-dialog vtable). Never reintroduce the cast.
 
 use super::ffi::{take_wide_string, HRESULT_ERROR_CANCELLED};
 use super::worker::{DialogTarget, WorkerShared};
@@ -304,27 +310,17 @@ fn run_show_and_extract(
     // the close path posts `WM_CLOSE` to the thread's windows instead.
     *shared.target.lock().unwrap_or_else(|error| error.into_inner()) = DialogTarget::FileDialog;
 
-    // The IModalWindow cast precedes entry (design section 5.3: entering
-    // the Show call is the evidence): its failure is a PRE-entry failure —
-    // the worker never claimed Accepted, so run_worker's transaction
-    // delivers the typed error through the entry handshake and never
-    // submits a terminal.
-    let modal: IModalWindow = match dialog.cast() {
-        Ok(modal) => modal,
-        Err(error) => {
-            *shared.target.lock().unwrap_or_else(|error| error.into_inner()) =
-                DialogTarget::None;
-            return Err(construction_failure(error));
-        }
-    };
-
     // Entry evidence: entering the Show call (no prior presentation signal
     // exists for IFileDialog — design section 5.3). Records the entered
     // state that gates every later terminal decision.
     let handshake_alive = shared.send_entry_entered("IFileDialog::Show-entry");
 
-    // SAFETY: the modal call runs on the owning STA thread.
-    let show = unsafe { modal.Show(None) };
+    // SAFETY: the modal call runs on the owning STA thread. Show is
+    // dispatched through the IFileDialog pointer, NEVER through an
+    // IModalWindow cast: the identical call through the base-interface
+    // pointer crashes at comdlg32+0x777c8 on real desktops (15/15 matrix,
+    // 2026-09-23; see the import-list note).
+    let show = unsafe { dialog.Show(None) };
 
     *shared.target.lock().unwrap_or_else(|error| error.into_inner()) = DialogTarget::None;
 
