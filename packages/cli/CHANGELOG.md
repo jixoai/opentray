@@ -1,5 +1,14 @@
 # opentray
 
+## 0.33.4
+
+### Patch Changes
+
+- 9dc1213: ext-webview win32 layout re-entrancy hardening (real-machine evidence 2026-09-24: pnpm-pub on 0.33.3 aborted the broker with 0xC0000409 within seconds of mounting — `RefCell already borrowed` at the layout-transaction `borrow_mut`, symbolized through a debug-PDB backtrace). Root mechanism: every `SetWindowPos`/`ShowWindow` inside a layout transaction can synchronously dispatch `WM_WINDOWPOSCHANGED`/`WM_SIZE` (directly or through WebView2 COM marshaling) back into the host window procedure on the same thread, re-entering `relayout` while a caller up that stack still holds a shared bridge borrow — the nested `borrow_mut` panics, and the window-proc ABI cannot unwind, aborting the process. Three layers of defense, all verified against the exact pnpm-pub placement-watch repro: (1) the box-update loop lifts a copyable `BoxHostHandle` out of the bridge and drops the borrow guard before the message-sending `update()`; (2) the whole apply transaction runs behind a per-HWND re-entrancy ledger (thread-local, deliberately outside the bridge's `RefCell` so the guard itself never contends) — a nested entry is always re-solving the same viewport the outer transaction applies, so it only marks the window pending and the outermost transaction flushes one final relayout; (3) every bridge borrow inside relayout/apply is now a `try_borrow`/`try_borrow_mut` — on any residual conflict the pass defers through a posted `WM_OPENTRAY_DEFERRED_RELAYOUT` message (the pump delivers it only after the blocking call chain has fully unwound and released), so no reachable code path can panic the broker over layout borrows again.
+  - @opentray/icon@0.33.4
+  - @opentray/spec@0.33.4
+  - @opentray/packaging@0.33.4
+
 ## 0.33.3
 
 ### Patch Changes
