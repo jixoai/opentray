@@ -1,6 +1,6 @@
 {
   "name": "@opentray/spec",
-  "version": "0.33.4",
+  "version": "0.33.5",
   "description": "Shared TypeScript protocol and contract types for OpenTray.",
   "type": "module",
   "license": "MIT",

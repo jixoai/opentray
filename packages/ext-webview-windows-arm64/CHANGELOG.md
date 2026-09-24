@@ -1,5 +1,7 @@
 # @opentray/ext-webview-windows-arm64
 
+## 0.33.5
+
 ## 0.33.4
 
 ## 0.33.3

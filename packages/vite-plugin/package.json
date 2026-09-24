@@ -1,6 +1,6 @@
 {
   "name": "@opentray/vite-plugin",
-  "version": "0.33.4",
+  "version": "0.33.5",
   "description": "Vite adapter for the OpenTray runtime artifact packaging contract.",
   "keywords": [
     "app-icon",
