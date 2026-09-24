@@ -62,9 +62,24 @@ pub(crate) struct BoxHostWindow {
     hwnd: HWND,
 }
 
+/// Borrow-free view of one [`BoxHostWindow`]: a raw HWND that never destroys
+/// on drop. The orchestration layer lifts this out of the bridge's `RefCell`
+/// and drops the borrow guard BEFORE `update()` — update sends window
+/// messages, which synchronously re-enter the window procedure, and a guard
+/// held across that send re-enters the bridge borrow to a panic.
+#[derive(Clone, Copy)]
+pub(crate) struct BoxHostHandle {
+    hwnd: HWND,
+}
+
 impl BoxHostWindow {
     pub(super) fn hwnd(&self) -> HWND {
         self.hwnd
+    }
+
+    /// Borrow-free view of this window (see [`BoxHostHandle`]).
+    pub(crate) fn handle(&self) -> BoxHostHandle {
+        BoxHostHandle { hwnd: self.hwnd }
     }
 
     pub(super) fn create(
@@ -110,12 +125,14 @@ impl BoxHostWindow {
         }
         Ok(Self { hwnd })
     }
+}
 
+impl BoxHostHandle {
     /// Layout-commit update: paint style, geometry, and visibility. Layout
     /// commits are low-frequency by construction, so the repaint request is
     /// unconditional and Win32 coalesces. `z_insert_after` re-positions the
     /// box in the sibling z-order only when the restack pass asks for it.
-    pub(super) fn update(
+    pub(crate) fn update(
         &self,
         style: &WebviewBoxStyle,
         rect: PhysicalBoxRect,

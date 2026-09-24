@@ -725,9 +725,15 @@ fn effective_document(bridge: &NavigatorWindowBridge) -> Option<WebviewLayoutDoc
 /// plain borrow so the WndProc path (which holds a `&RefCell` view of the
 /// session's bridge) shares one implementation; `&Rc` callers deref-coerce.
 pub(super) fn relayout(hwnd: HWND, bridge: &RefCell<NavigatorWindowBridge>) {
-    let document = {
-        let state = bridge.borrow();
-        effective_document(&state)
+    let document = match bridge.try_borrow() {
+        Ok(state) => effective_document(&state),
+        Err(_) => {
+            // A caller up this stack holds the bridge (e.g. a WebView2 event
+            // handler across a native call). Never panic — defer through the
+            // pump, which runs after that caller has released.
+            defer_relayout(hwnd);
+            return;
+        }
     };
     let Some(document) = document else {
         return;
@@ -741,6 +747,25 @@ pub(super) fn relayout(hwnd: HWND, bridge: &RefCell<NavigatorWindowBridge>) {
     apply_layout_solution(hwnd, bridge, &solution);
 }
 
+/// Re-entrancy ledger for layout transactions, keyed by host HWND. Win32
+/// makes nested applies unavoidable: every `SetWindowPos` in a transaction
+/// can synchronously dispatch `WM_WINDOWPOSCHANGED`/`WM_SIZE` into the host
+/// window procedure, which re-enters [`relayout`] on the SAME thread while
+/// the outer transaction's callers may legitimately hold a shared bridge
+/// borrow — the nested `borrow_mut` then panics (and the window-proc ABI
+/// cannot unwind, aborting the broker; real-machine pnpm-pub 0xC0000409).
+/// The ledger deliberately lives OUTSIDE the bridge's `RefCell` so the guard
+/// itself never contends with a held borrow. A nested entry is always
+/// redundant — it re-solves the same viewport the outer transaction is
+/// already applying — so it only marks the window pending; the outermost
+/// transaction flushes ONE final relayout on exit, so no update is lost.
+thread_local! {
+    static LAYOUT_TRANSACTION_HWNDS: std::cell::RefCell<std::collections::HashSet<isize>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+    static RELAYOUT_PENDING_HWNDS: std::cell::RefCell<std::collections::HashSet<isize>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
 /// Applies an already-validated solution (the command path validates and
 /// solves once, then hands the solution here; resize paths call
 /// [`relayout`]). One transaction: apply frames → boxes → z-order →
@@ -751,6 +776,10 @@ pub(super) fn apply_layout_solution(
     bridge: &RefCell<NavigatorWindowBridge>,
     solution: &LayoutSolution,
 ) {
+    if transaction_reentered(hwnd) {
+        return;
+    }
+    'transaction: {
     let scale = windows_geometry(hwnd).scale_factor();
     let plan = layout_apply_plan(solution, scale);
 
@@ -758,7 +787,13 @@ pub(super) fn apply_layout_solution(
     // view (the WM_SIZE ordering law), applied without a bridge borrow held
     // across the Win32 calls.
     let controller_targets: Vec<(String, NonNull<WebView>, PhysicalBoxRect, bool)> = {
-        let state = bridge.borrow();
+        let state = match bridge.try_borrow() {
+            Ok(state) => state,
+            Err(_) => {
+                defer_relayout(hwnd);
+                break 'transaction;
+            }
+        };
         plan.steps
             .iter()
             .filter_map(|step| match step {
@@ -804,7 +839,13 @@ pub(super) fn apply_layout_solution(
         })
         .collect();
     let existing_boxes: Vec<(String, PhysicalBoxRect, bool, WebviewBoxStyle)> = {
-        let state = bridge.borrow();
+        let state = match bridge.try_borrow() {
+            Ok(state) => state,
+            Err(_) => {
+                defer_relayout(hwnd);
+                break 'transaction;
+            }
+        };
         solved_boxes
             .iter()
             .filter(|(id, ..)| state.boxes.contains_key(id))
@@ -812,12 +853,30 @@ pub(super) fn apply_layout_solution(
             .collect()
     };
     for (id, physical, visible, style) in existing_boxes {
-        if let Some(window) = bridge.borrow().boxes.get(&id) {
+        // Lift the handle out and END the borrow before `update()`: update
+        // sends window messages, which can synchronously re-enter the window
+        // procedure and this orchestration — a guard held across the send
+        // collided with the Phase-2 `borrow_mut` below ("RefCell already
+        // borrowed", the real-machine pnpm-pub abort 0xC0000409).
+        let window = match bridge.try_borrow() {
+            Ok(state) => state.boxes.get(&id).map(BoxHostWindow::handle),
+            Err(_) => {
+                defer_relayout(hwnd);
+                continue;
+            }
+        };
+        if let Some(window) = window {
             window.update(&style, physical, visible, None);
         }
     }
     {
-        let mut state = bridge.borrow_mut();
+        let mut state = match bridge.try_borrow_mut() {
+            Ok(state) => state,
+            Err(_) => {
+                defer_relayout(hwnd);
+                break 'transaction;
+            }
+        };
         let live: HashSet<&String> = solved_boxes.iter().map(|(id, ..)| id).collect();
         let mut created: Vec<(String, BoxHostWindow)> = Vec::new();
         state.boxes.retain(|id, _| live.contains(id));
@@ -837,7 +896,13 @@ pub(super) fn apply_layout_solution(
     // Phase 3 — record applied geometry + stacking; restack the child HWNDs
     // when the z-order changed (layer array order is the stacking law).
     let z_changed = {
-        let mut state = bridge.borrow_mut();
+        let mut state = match bridge.try_borrow_mut() {
+            Ok(state) => state,
+            Err(_) => {
+                defer_relayout(hwnd);
+                break 'transaction;
+            }
+        };
         let z_changed = state.layout.z_order != plan.z_keys;
         state.layout.rects.clear();
         for solved in &solution.views {
@@ -857,7 +922,13 @@ pub(super) fn apply_layout_solution(
     // browsing contexts stay alive; unreferenced views leave the
     // composition until a layout references them again).
     let unpositioned: Vec<NonNull<WebView>> = {
-        let state = bridge.borrow();
+        let state = match bridge.try_borrow() {
+            Ok(state) => state,
+            Err(_) => {
+                defer_relayout(hwnd);
+                break 'transaction;
+            }
+        };
         state
             .views
             .iter()
@@ -872,6 +943,40 @@ pub(super) fn apply_layout_solution(
     // Phase 5 — recompute per-view overlay/titlebar safe-area projections
     // and push `geometryChange` (D23) from the same recompute.
     refresh_overlay_projection(hwnd, bridge);
+    } // 'transaction
+    close_layout_transaction(hwnd, bridge);
+}
+
+/// Transaction guard: `true` marks this HWND as nested (caller returns
+/// immediately, one deferred relayout is flushed by the outermost
+/// transaction).
+fn transaction_reentered(hwnd: HWND) -> bool {
+    LAYOUT_TRANSACTION_HWNDS.with(|active| {
+        let mut active = active.borrow_mut();
+        if active.insert(hwnd as isize) {
+            false
+        } else {
+            RELAYOUT_PENDING_HWNDS.with(|pending| {
+                pending.borrow_mut().insert(hwnd as isize);
+            });
+            true
+        }
+    })
+}
+
+/// Ends the outermost transaction; if any nested entry deferred work, ONE
+/// final relayout runs now — with no borrows or messages in flight from this
+/// frame, so it cannot re-enter.
+fn close_layout_transaction(hwnd: HWND, bridge: &RefCell<NavigatorWindowBridge>) {
+    LAYOUT_TRANSACTION_HWNDS.with(|active| {
+        active.borrow_mut().remove(&(hwnd as isize));
+    });
+    let flush = RELAYOUT_PENDING_HWNDS.with(|pending| {
+        pending.borrow_mut().remove(&(hwnd as isize))
+    });
+    if flush {
+        relayout(hwnd, bridge);
+    }
 }
 
 /// Applies one solved frame to a controller: WebView2 controller bounds
@@ -978,6 +1083,24 @@ fn restack_children(
             );
         }
         insert_after = *hwnd;
+    }
+}
+
+/// Posted (never sent) relayout request: the pump delivers it only after the
+/// current synchronous Win32 call chain has fully unwound, so the relayout
+/// cannot re-enter any bridge borrow a caller up that stack still holds.
+pub(super) const WM_OPENTRAY_DEFERRED_RELAYOUT: u32 = 0xB000;
+
+/// Defers one relayout pass through the message pump (see
+/// [`WM_OPENTRAY_DEFERRED_RELAYOUT`]).
+pub(super) fn defer_relayout(hwnd: HWND) {
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::PostMessageW(
+            hwnd,
+            WM_OPENTRAY_DEFERRED_RELAYOUT,
+            0,
+            0,
+        );
     }
 }
 

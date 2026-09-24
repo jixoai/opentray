@@ -6684,6 +6684,14 @@ unsafe extern "system" fn window_proc(
             }
             result
         }
+        msg if msg == self::orchestration::WM_OPENTRAY_DEFERRED_RELAYOUT => {
+            // Posted by a relayout/apply that found the bridge borrowed by a
+            // caller up its own synchronous Win32 call chain. The pump only
+            // delivers this after that chain unwound, so the retry is clean.
+            resize_attached_webviews_from_layout(hwnd);
+            notify_attached_webviews_parent_position_changed(hwnd);
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_SIZE => {
             let result = DefWindowProcW(hwnd, msg, wparam, lparam);
             if !window_proc_surface_refresh_suppressed(hwnd) {
