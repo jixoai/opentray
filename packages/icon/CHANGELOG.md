@@ -1,5 +1,11 @@
 # @opentray/icon
 
+## 0.34.0
+
+### Patch Changes
+
+- @opentray/spec@0.34.0
+
 ## 0.33.7
 
 ### Patch Changes

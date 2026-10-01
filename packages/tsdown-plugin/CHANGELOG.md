@@ -1,5 +1,11 @@
 # @opentray/tsdown-plugin
 
+## 0.34.0
+
+### Patch Changes
+
+- @opentray/packaging@0.34.0
+
 ## 0.33.7
 
 ### Patch Changes
