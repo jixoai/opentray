@@ -58,6 +58,7 @@ fn test_bridge_with_port_state(
             sync_icon: MetadataSyncSettings::default(),
         },
         app_region_drag: AppRegionDragState::default(),
+        soft_resize: SoftResizeState::default(),
         devtools_enabled: false,
         download: WebviewDownloadSettings::default(),
         native_api_policy: WebviewNativeApiPolicy::default(),
