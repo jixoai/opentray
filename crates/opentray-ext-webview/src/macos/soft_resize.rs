@@ -20,10 +20,7 @@ use serde_json::{json, Value};
 
 use crate::WebviewRuntimeError;
 
-use super::{
-    bridge::{emit_window_event, submit_window_event_push, NavigatorWindowBridge},
-    drag::queue_window_interaction_event,
-};
+use super::{drag::queue_window_interaction_event, NavigatorWindowBridge};
 
 /// Frame fallbacks when the window carries no meaningful `minSize` — the same
 /// floors the public `resizeTo` command applies.
