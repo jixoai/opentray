@@ -92,4 +92,20 @@ describe("OpenTray package identity", () => {
       code: "invalid_package_manifest",
     });
   });
+
+  it("falls back to the working directory when the script has no package boundary", async () => {
+    const root = await mkdtemp("/tmp/opentray-package-identity-");
+    roots.push(root);
+    const scriptPath = join(root, "bare/main.mjs");
+    await mkdir(join(root, "bare"), { recursive: true });
+    await writeFile(scriptPath, "export {};");
+
+    // Regression (macOS bare consumers, 2026-10-02): a boundary-less script
+    // used to crash with the third-party resolver's untyped
+    // "Cannot find package.json" throw before any env/cwd fallback could
+    // run. The walk must exhaust as "not found" and reach the cwd fallback.
+    const identity = await resolveOpenTrayPackageIdentity({ scriptPath, env: {} });
+    expect(identity.name).toBe("@opentray/packaging");
+    expect(identity.manifestPath).toBe(join(process.cwd(), "package.json"));
+  });
 });

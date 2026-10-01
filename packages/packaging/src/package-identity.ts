@@ -7,8 +7,6 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { createResolverByRootFile } from "@gaubee/node/path";
-
 export interface OpenTrayPackageIdentity {
   readonly name: string;
   readonly root: string;
@@ -169,14 +167,23 @@ const readPackageIdentity = async (
 const readNearestPackageIdentity = async (
   fromPath: string,
 ): Promise<OpenTrayPackageIdentity | undefined> => {
-  try {
-    const resolver = createResolverByRootFile(fromPath, "package.json");
-    return await readManifestIdentity(resolver("package.json"));
-  } catch (error) {
-    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+  // An own upward walk to the nearest package.json: exhausting the tree is
+  // "not found" (undefined) so the documented env/cwd fallbacks stay reachable
+  // for boundary-less scripts. The third-party root-file resolver expresses
+  // the same exhaustion as an untyped throw, which used to crash bare macOS
+  // consumers before any fallback could run.
+  let directory = fromPath;
+  for (;;) {
+    // `readManifestIdentity` returns undefined only for a missing manifest;
+    // a present-but-malformed one still throws its typed error so the walk
+    // stops at the first real package boundary.
+    const identity = await readManifestIdentity(join(directory, "package.json"));
+    if (identity !== undefined) return identity;
+    const parent = dirname(directory);
+    if (parent === directory) {
       return undefined;
     }
-    throw error;
+    directory = parent;
   }
 };
 
