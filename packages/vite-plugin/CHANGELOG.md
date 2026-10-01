@@ -1,5 +1,14 @@
 # @opentray/vite-plugin
 
+## 0.34.1
+
+### Patch Changes
+
+- Updated dependencies [b90bef4]
+  - @opentray/packaging@0.34.1
+  - @opentray/icon@0.34.1
+  - @opentray/spec@0.34.1
+
 ## 0.34.0
 
 ### Patch Changes
