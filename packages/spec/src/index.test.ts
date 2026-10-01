@@ -181,7 +181,11 @@ describe("@opentray/spec", () => {
         text: "Build",
         isTemplate: true,
       },
-      "win32-icon-only": { type: "file", path: "./win32-icon-only.png" },
+      "win32-icon-only": {
+        type: "file",
+        path: "./win32-icon-only.png",
+        isTemplate: true,
+      },
       "win32-icon-text": {
         type: "file",
         path: "./win32-icon-text.png",
@@ -204,7 +208,7 @@ describe("@opentray/spec", () => {
     expect(icon["darwin-icon-text"]?.text).toBe("Build");
     expect(JSON.parse(JSON.stringify(icon))).toMatchObject({
       "darwin-icon-only": { isTemplate: true },
-      "win32-icon-only": { path: "./win32-icon-only.png" },
+      "win32-icon-only": { isTemplate: true },
       "linux-icon-text": { text: "Build" },
     });
     expect(textOnlyIcon["text-only"]).toBe("Build");

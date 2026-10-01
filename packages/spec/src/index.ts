@@ -382,7 +382,9 @@ export type IconText = IconImage & { text: string };
 
 export type DarwinIcon = IconImage & { isTemplate?: boolean };
 
-export type Win32Icon = IconImage;
+/** `isTemplate` re-tints the pixels to the taskbar glyph color (win32 analog
+ *  of the macOS template image; follows system theme flips). */
+export type Win32Icon = IconImage & { isTemplate?: boolean };
 
 export type LinuxIcon = IconImage;
 

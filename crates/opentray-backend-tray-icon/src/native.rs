@@ -332,10 +332,12 @@ fn apply_native_tray_update(
         .map_err(|error| BackendError::Failure(error.to_string()))?;
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = icon_is_template;
         native
             .set_icon(icon)
             .map_err(|error| BackendError::Failure(error.to_string()))?;
+        // Win32 honors the template flag too (taskbar glyph tint); apply it
+        // after the icon swap so the tint is computed from the new pixels.
+        native.set_icon_as_template(icon_is_template);
     }
     #[cfg(target_os = "macos")]
     native.set_title(Some(title.unwrap_or_default()));

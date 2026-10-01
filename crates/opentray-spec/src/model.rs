@@ -463,8 +463,8 @@ pub enum MenuItem {
 pub struct Icon {
     pub icon_only: Option<IconImage>,
     pub darwin_icon_only: Option<DarwinIcon>,
-    pub win32_icon_only: Option<IconImage>,
-    pub linux_icon_only: Option<IconImage>,
+    pub win32_icon_only: Option<Win32Icon>,
+    pub linux_icon_only: Option<LinuxIcon>,
     pub text_only: Option<String>,
     pub icon_text: Option<IconText>,
     pub darwin_icon_text: Option<DarwinIconText>,
@@ -747,9 +747,55 @@ impl<'de> Deserialize<'de> for IconText {
     }
 }
 
-pub type Win32Icon = IconImage;
+/// Template-capable icon candidate for the non-darwin platform keys
+/// (2026-09-29 win32-tray-icon-fidelity): `isTemplate` is an optional wire key
+/// defaulting to false, mirroring `DarwinIcon`. Plain `IconImage` payloads
+/// keep parsing unchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlatformIcon {
+    pub image: IconImage,
+    pub is_template: bool,
+}
 
-pub type LinuxIcon = IconImage;
+impl Serialize for PlatformIcon {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut object = image_object(&self.image).map_err(serde::ser::Error::custom)?;
+        if self.is_template {
+            object.insert("isTemplate".to_string(), Value::Bool(true));
+        }
+        object.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PlatformIcon {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Value::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| de::Error::custom("platform icon must be an object"))?;
+        let is_template = object
+            .get("isTemplate")
+            .map(|value| {
+                value
+                    .as_bool()
+                    .ok_or_else(|| de::Error::custom("platform icon isTemplate must be a boolean"))
+            })
+            .transpose()?
+            .unwrap_or(false);
+        let image = serde_json::from_value(value).map_err(de::Error::custom)?;
+        Ok(Self { image, is_template })
+    }
+}
+
+pub type Win32Icon = PlatformIcon;
+
+pub type LinuxIcon = PlatformIcon;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DarwinIcon {
@@ -1072,14 +1118,20 @@ mod tests {
         );
         assert_eq!(
             icon.win32_icon_only,
-            Some(IconImage::File {
-                path: "win32.png".to_string(),
+            Some(PlatformIcon {
+                image: IconImage::File {
+                    path: "win32.png".to_string(),
+                },
+                is_template: false,
             })
         );
         assert_eq!(
             icon.linux_icon_only,
-            Some(IconImage::File {
-                path: "linux.png".to_string(),
+            Some(PlatformIcon {
+                image: IconImage::File {
+                    path: "linux.png".to_string(),
+                },
+                is_template: false,
             })
         );
         assert_eq!(icon.text_only.as_deref(), Some("Build"));
@@ -1139,6 +1191,44 @@ mod tests {
         assert_eq!(encoded["darwin-icon-text"]["isTemplate"], true);
         assert_eq!(encoded["win32-icon-text"]["text"], "Build");
         assert_eq!(encoded["linux-icon-only"]["path"], "linux.png");
+    }
+
+    #[test]
+    fn platform_icon_template_roundtrip() {
+        // win32-tray-icon-fidelity：win32/linux 候选携带可选 isTemplate，
+        // 缺省 false；纯 IconImage 负载兼容不变。
+        let icon: Icon = serde_json::from_value(json!({
+            "win32-icon-only": {
+                "type": "file",
+                "path": "mono.png",
+                "isTemplate": true
+            },
+            "linux-icon-only": { "type": "file", "path": "plain.png" }
+        }))
+        .expect("icon");
+        assert_eq!(
+            icon.win32_icon_only,
+            Some(PlatformIcon {
+                image: IconImage::File {
+                    path: "mono.png".to_string()
+                },
+                is_template: true,
+            })
+        );
+        assert_eq!(
+            icon.linux_icon_only,
+            Some(PlatformIcon {
+                image: IconImage::File {
+                    path: "plain.png".to_string()
+                },
+                is_template: false,
+            })
+        );
+
+        let encoded = serde_json::to_value(icon).expect("serialized icon");
+        assert_eq!(encoded["win32-icon-only"]["isTemplate"], true);
+        // false 不上图（与 DarwinIcon 同形：省略即 false）。
+        assert!(encoded["linux-icon-only"].get("isTemplate").is_none());
     }
 
     #[test]

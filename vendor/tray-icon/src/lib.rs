@@ -175,7 +175,12 @@ pub struct TrayIconAttributes {
     /// Tray icon temp dir path. **Linux only**.
     pub temp_dir_path: Option<PathBuf>,
 
-    /// Use the icon as a [template](https://developer.apple.com/documentation/appkit/nsimage/1520017-template?language=objc). **macOS only**.
+    /// Use the icon as a [template](https://developer.apple.com/documentation/appkit/nsimage/1520017-template?language=objc).
+    ///
+    /// **macOS**: marks the NSImage as a template so AppKit re-colors it to
+    /// the menu-bar theme. **Windows**: the icon's pixels are re-tinted to
+    /// the current taskbar glyph color (alpha preserved) and re-tinted again
+    /// when the system theme flips.
     pub icon_is_template: bool,
 
     /// Whether to show the tray menu on left click or not, default is `true`.
@@ -299,7 +304,15 @@ impl TrayIconBuilder {
         self
     }
 
-    /// Use the icon as a [template](https://developer.apple.com/documentation/appkit/nsimage/1520017-template?language=objc). **macOS only**.
+    /// Use the icon as a [template](https://developer.apple.com/documentation/appkit/nsimage/1520017-template?language=objc).
+    ///
+    /// ## Platform-specific:
+    ///
+    /// - **macOS**: marks the NSImage as a template so AppKit re-colors it
+    ///   to the menu-bar theme.
+    /// - **Windows**: the icon's pixels are re-tinted to the current taskbar
+    ///   glyph color (alpha preserved) and re-tinted again when the system
+    ///   theme flips.
     pub fn with_icon_as_template(mut self, is_template: bool) -> Self {
         self.attrs.icon_is_template = is_template;
         self
@@ -448,11 +461,19 @@ impl TrayIcon {
         let _ = path;
     }
 
-    /// Set the current icon as a [template](https://developer.apple.com/documentation/appkit/nsimage/1520017-template?language=objc). **macOS only**.
+    /// Set the current icon as a [template](https://developer.apple.com/documentation/appkit/nsimage/1520017-template?language=objc).
+    ///
+    /// ## Platform-specific:
+    ///
+    /// - **macOS**: marks the NSImage as a template so AppKit re-colors it
+    ///   to the menu-bar theme.
+    /// - **Windows**: re-tints the icon's pixels to the current taskbar
+    ///   glyph color (alpha preserved); the tint follows system theme flips.
+    /// - **Linux:** Unsupported.
     pub fn set_icon_as_template(&self, is_template: bool) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         self.tray.borrow_mut().set_icon_as_template(is_template);
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let _ = is_template;
     }
 

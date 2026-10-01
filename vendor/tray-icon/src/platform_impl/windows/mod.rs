@@ -49,6 +49,7 @@ const WM_USER_LEAVE_TIMER_ID: u32 = 6008;
 const WM_USER_SHOW_MENU_ON_LEFT_CLICK: u32 = 6009;
 const WM_USER_SHOW_MENU_ON_RIGHT_CLICK: u32 = 6010;
 const WM_USER_UPDATE_TRAYTITLE: u32 = 6011;
+const WM_USER_UPDATE_TRAYTEMPLATE: u32 = 6012;
 /// When the taskbar is created, it registers a message with the "TaskbarCreated" string and then broadcasts this message to all top-level windows
 /// When the application receives this message, it should assume that any taskbar icons it added have been removed and add them again.
 static S_U_TASKBAR_RESTART: Lazy<u32> =
@@ -60,6 +61,12 @@ struct TrayUserData {
     hwnd: HWND,
     hpopupmenu: Option<HMENU>,
     icon: Option<Icon>,
+    /// Whether the explicit icon registers as a template (win32 analog of the
+    /// macOS template image: monochrome glyph re-tinted to the taskbar theme).
+    icon_is_template: bool,
+    /// The current tinted render of a template icon; `None` when the icon is
+    /// not a template or the icon has no retained RGBA to tint.
+    template_icon: Option<Icon>,
     /// The tray's title. When no explicit icon is set, the title is
     /// rasterized into `title_icon` (the macOS NSStatusItem-title alignment
     /// shim); an explicit icon always wins and clears the render.
@@ -104,13 +111,14 @@ impl TrayIcon {
             } else {
                 None
             };
-            // The registration icon: explicit icon, else the title render.
-            // Computed before `title_icon` moves into the window data.
-            let hicon = attrs
-                .icon
-                .as_ref()
-                .map(|i| i.inner.as_raw_handle())
-                .or_else(|| title_icon.as_ref().map(|i| i.inner.as_raw_handle()));
+            let icon_is_template = attrs.icon_is_template;
+            // Template icons register their tinted render; see
+            // `tinted_template_icon` for the degradation path.
+            let template_icon = if icon_is_template {
+                attrs.icon.as_ref().and_then(tinted_template_icon)
+            } else {
+                None
+            };
 
             let traydata = TrayUserData {
                 id,
@@ -118,6 +126,8 @@ impl TrayIcon {
                 hwnd: std::ptr::null_mut(),
                 hpopupmenu: attrs.menu.as_ref().map(|m| m.hpopupmenu() as _),
                 icon: attrs.icon.clone(),
+                icon_is_template,
+                template_icon,
                 title: attrs.title.clone(),
                 title_icon,
                 tooltip: attrs.tooltip.clone(),
@@ -126,6 +136,11 @@ impl TrayIcon {
                 menu_on_left_click: attrs.menu_on_left_click,
                 menu_on_right_click: attrs.menu_on_right_click,
             };
+
+            // The registration icon: the template render (when tinting
+            // succeeded), else the explicit icon, else the title render —
+            // the same precedence `effective_tray_hicon` enforces everywhere.
+            let hicon = effective_tray_hicon(&traydata);
 
             let hwnd = CreateWindowExW(
                 WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED |
@@ -174,25 +189,12 @@ impl TrayIcon {
     }
 
     pub fn set_icon(&mut self, icon: Option<Icon>) -> crate::Result<()> {
+        // The displayed handle depends on tray state the window proc owns —
+        // the template flag (a template icon displays its tinted render) and
+        // the title fallback. Store the icon there and let one
+        // `rebuild_display_hicon` decide, exactly like every other visual
+        // change.
         unsafe {
-            // A `None` icon no longer clears the visual outright: with a
-            // title present the title-render fallback applies instead, and
-            // that decision (plus the NIM_MODIFY) happens in the window
-            // proc where the tray data lives — see WM_USER_UPDATE_TRAYICON.
-            if let Some(hicon) = icon.as_ref().map(|i| i.inner.as_raw_handle()) {
-                let mut nid = NOTIFYICONDATAW {
-                    uFlags: NIF_ICON,
-                    hWnd: self.hwnd,
-                    uID: self.internal_id,
-                    hIcon: hicon,
-                    ..std::mem::zeroed()
-                };
-                if Shell_NotifyIconW(NIM_MODIFY, &mut nid as _) == 0 {
-                    return Err(crate::Error::OsError(std::io::Error::last_os_error()));
-                }
-            }
-
-            // send the new icon to the subclass proc to store it in the tray data
             SendMessageW(
                 self.hwnd,
                 WM_USER_UPDATE_TRAYICON,
@@ -202,6 +204,21 @@ impl TrayIcon {
         }
 
         Ok(())
+    }
+
+    /// Toggles the template treatment of the current explicit icon: template
+    /// icons display a render re-tinted to the current taskbar theme and
+    /// re-tint again when the system theme flips. The win32 analog of the
+    /// macOS template image.
+    pub fn set_icon_as_template(&mut self, is_template: bool) {
+        unsafe {
+            SendMessageW(
+                self.hwnd,
+                WM_USER_UPDATE_TRAYTEMPLATE,
+                is_template as usize,
+                0,
+            );
+        }
     }
 
     /// Sets the tray title. With no explicit icon, the title is rasterized
@@ -391,38 +408,33 @@ unsafe extern "system" fn tray_proc(
         WM_USER_UPDATE_TRAYICON => {
             let icon = Box::from_raw(wparam as *mut Option<Icon>);
             userdata.icon = *icon;
-            if userdata.icon.is_some() {
-                // An explicit icon always wins; drop any title render.
-                userdata.title_icon = None;
-            } else {
-                // Icon removed: fall back to the title render (or clear the
-                // icon outright when there is no title either).
-                let hicon = refresh_title_icon(userdata).unwrap_or(std::ptr::null_mut());
-                modify_tray_icon(userdata.hwnd, userdata.internal_id, hicon);
-            }
+            let hicon = rebuild_display_hicon(userdata).unwrap_or(std::ptr::null_mut());
+            modify_tray_icon(userdata.hwnd, userdata.internal_id, hicon);
         }
         WM_USER_UPDATE_TRAYTITLE => {
             let title = Box::from_raw(wparam as *mut Option<String>);
             userdata.title = *title;
-            if userdata.icon.is_none() {
-                if let Some(hicon) = refresh_title_icon(userdata) {
-                    modify_tray_icon(userdata.hwnd, userdata.internal_id, hicon);
-                }
-            }
+            let hicon = rebuild_display_hicon(userdata).unwrap_or(std::ptr::null_mut());
+            modify_tray_icon(userdata.hwnd, userdata.internal_id, hicon);
+        }
+        WM_USER_UPDATE_TRAYTEMPLATE => {
+            userdata.icon_is_template = wparam != 0;
+            let hicon = rebuild_display_hicon(userdata).unwrap_or(std::ptr::null_mut());
+            modify_tray_icon(userdata.hwnd, userdata.internal_id, hicon);
         }
         WM_SETTINGCHANGE => {
-            // Theme flip (light/dark taskbar): re-render title-based icons so
-            // the glyph contrast follows the new system theme. Explicit icons
-            // are the application's own artwork and are left untouched.
+            // Theme flip (light/dark taskbar): re-render theme-following
+            // visuals — title-based icons and template icons both derive
+            // their color from the taskbar theme. Non-template explicit
+            // icons are the application's own artwork and stay untouched.
             if lparam != 0 {
                 let section = setting_change_section(lparam);
                 if section.eq_ignore_ascii_case("ImmersiveColorSet")
-                    && userdata.icon.is_none()
-                    && userdata.title.is_some()
+                    && ((userdata.icon.is_none() && userdata.title.is_some())
+                        || (userdata.icon.is_some() && userdata.icon_is_template))
                 {
-                    if let Some(hicon) = refresh_title_icon(userdata) {
-                        modify_tray_icon(userdata.hwnd, userdata.internal_id, hicon);
-                    }
+                    let hicon = rebuild_display_hicon(userdata).unwrap_or(std::ptr::null_mut());
+                    modify_tray_icon(userdata.hwnd, userdata.internal_id, hicon);
                 }
             }
             return DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -639,36 +651,51 @@ unsafe fn show_tray_menu(hwnd: HWND, menu: HMENU, x: i32, y: i32) {
     PostMessageW(hwnd, WM_NULL, 0, 0);
 }
 
-/// The icon the shell should currently show: the explicit icon, else the
-/// rasterized title (the macOS-title alignment shim).
+/// The icon the shell should currently show: the template render (when one
+/// exists), else the explicit icon, else the rasterized title (the macOS-title
+/// alignment shim).
 unsafe fn effective_tray_hicon(userdata: &TrayUserData) -> Option<HICON> {
     userdata
-        .icon
+        .template_icon
         .as_ref()
         .map(|i| i.inner.as_raw_handle())
+        .or_else(|| userdata.icon.as_ref().map(|i| i.inner.as_raw_handle()))
         .or_else(|| userdata.title_icon.as_ref().map(|i| i.inner.as_raw_handle()))
 }
 
-/// Re-rasterizes the title icon when the tray has no explicit icon. Returns
-/// the new HICON (owned by the stored `title_icon`), or `None` when there is
-/// nothing to render — callers decide whether that means "clear the icon".
-unsafe fn refresh_title_icon(userdata: &mut TrayUserData) -> Option<HICON> {
-    if userdata.icon.is_some() {
+/// Recomputes every derived render after icon/title/template state changed,
+/// stores them on the tray data, and returns the handle to push via
+/// `NIM_MODIFY` — `None` means "nothing to display", callers clear the icon.
+unsafe fn rebuild_display_hicon(userdata: &mut TrayUserData) -> Option<HICON> {
+    if let Some(icon) = userdata.icon.as_ref() {
+        // An explicit icon always wins; drop any title render.
         userdata.title_icon = None;
-        return None;
-    }
-    let title = userdata.title.clone()?;
-    match text_icon::render_title_icon(&title) {
-        Some(icon) => {
-            let handle = icon.inner.as_raw_handle();
-            userdata.title_icon = Some(icon);
-            Some(handle)
-        }
-        None => {
-            userdata.title_icon = None;
+        userdata.template_icon = if userdata.icon_is_template {
+            tinted_template_icon(icon)
+        } else {
             None
-        }
+        };
+        return effective_tray_hicon(userdata);
     }
+    userdata.template_icon = None;
+    // Icon removed: fall back to the title render (or nothing, when there is
+    // no title either).
+    userdata.title_icon = userdata
+        .title
+        .as_deref()
+        .and_then(text_icon::render_title_icon);
+    effective_tray_hicon(userdata)
+}
+
+/// Builds the tinted render of a template icon: every pixel's RGB becomes the
+/// current taskbar glyph color, alpha (the coverage) is preserved. `None`
+/// (icon built from a handle/path/resource, so no retained RGBA) degrades to
+/// the un-tinted artwork.
+fn tinted_template_icon(icon: &Icon) -> Option<Icon> {
+    let rgba_icon = icon.inner.rgba_icon()?;
+    let tinted =
+        text_icon::template_tint_rgba(&rgba_icon.rgba, text_icon::taskbar_glyph_rgb());
+    Icon::from_rgba(tinted, rgba_icon.width, rgba_icon.height).ok()
 }
 
 /// One `NIM_MODIFY | NIF_ICON`. A null handle clears the icon.

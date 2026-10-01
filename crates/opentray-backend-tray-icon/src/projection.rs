@@ -159,22 +159,16 @@ fn effective_icon_only(icon: &Icon, os: IconOs) -> Option<TrayIconSelection<'_>>
                 text: None,
                 is_template: candidate.is_template,
             }),
-        IconOs::Win32 => icon
-            .win32_icon_only
-            .as_ref()
-            .map(|image| TrayIconSelection {
-                image,
-                text: None,
-                is_template: false,
-            }),
-        IconOs::Linux => icon
-            .linux_icon_only
-            .as_ref()
-            .map(|image| TrayIconSelection {
-                image,
-                text: None,
-                is_template: false,
-            }),
+        IconOs::Win32 => icon.win32_icon_only.as_ref().map(|candidate| TrayIconSelection {
+            image: &candidate.image,
+            text: None,
+            is_template: candidate.is_template,
+        }),
+        IconOs::Linux => icon.linux_icon_only.as_ref().map(|candidate| TrayIconSelection {
+            image: &candidate.image,
+            text: None,
+            is_template: candidate.is_template,
+        }),
         IconOs::Other => None,
     }
     .or_else(|| {
@@ -1263,7 +1257,7 @@ mod tests {
         let icon = Icon {
             icon_only: Some(rgba_image([1, 2, 3, 4])),
             darwin_icon_only: None,
-            win32_icon_only: Some(rgba_image([9, 10, 11, 12])),
+            win32_icon_only: Some(platform_icon([9, 10, 11, 12], false)),
             linux_icon_only: None,
             text_only: None,
             icon_text: None,
@@ -1279,11 +1273,33 @@ mod tests {
     }
 
     #[test]
+    fn win32_icon_only_carries_template_flag() {
+        // win32-tray-icon-fidelity：win32 候选的 isTemplate 必须透传到原生层
+        //（此前 win32 全链丢弃，纯色/主题跟随无从谈起）。
+        let icon = Icon {
+            icon_only: None,
+            darwin_icon_only: None,
+            win32_icon_only: Some(platform_icon([9, 10, 11, 12], true)),
+            linux_icon_only: None,
+            text_only: None,
+            icon_text: None,
+            darwin_icon_text: None,
+            win32_icon_text: None,
+            linux_icon_text: None,
+            fallback: None,
+        };
+
+        let selection = effective_icon_only(&icon, IconOs::Win32).expect("selection");
+
+        assert_selection(selection, &[9, 10, 11, 12], None, true);
+    }
+
+    #[test]
     fn non_matching_os_icon_candidate_does_not_shadow_generic() {
         let icon = Icon {
             icon_only: Some(rgba_image([1, 2, 3, 4])),
             darwin_icon_only: None,
-            win32_icon_only: Some(rgba_image([9, 10, 11, 12])),
+            win32_icon_only: Some(platform_icon([9, 10, 11, 12], false)),
             linux_icon_only: None,
             text_only: None,
             icon_text: None,
@@ -1359,6 +1375,13 @@ mod tests {
             data: data.to_vec(),
             width: 1,
             height: 1,
+        }
+    }
+
+    fn platform_icon(data: [u8; 4], is_template: bool) -> opentray_spec::Win32Icon {
+        opentray_spec::Win32Icon {
+            image: rgba_image(data),
+            is_template,
         }
     }
 

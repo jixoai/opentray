@@ -93,6 +93,36 @@ fn scaled(logical: i32, dpi: i32) -> i32 {
     (logical as i64 * dpi as i64 / 96) as i32
 }
 
+/// The tray's physical icon slot (square, 16 logical px) at the screen's
+/// current DPI. The same sizing every title render uses, exposed so pixel
+/// artwork registers at the same physical size (the shell otherwise
+/// cheap-stretches a full-resolution bitmap into the slot).
+pub(super) fn tray_physical_slot_px() -> u32 {
+    use windows_sys::Win32::Graphics::Gdi::{CreateCompatibleDC, DeleteDC, GetDeviceCaps, LOGPIXELSX};
+
+    unsafe {
+        let screen_dc = CreateCompatibleDC(std::ptr::null_mut());
+        if screen_dc.is_null() {
+            return LOGICAL_ICON_HEIGHT as u32;
+        }
+        let dpi = GetDeviceCaps(screen_dc, LOGPIXELSX as i32).max(96);
+        DeleteDC(screen_dc);
+        scaled(LOGICAL_ICON_HEIGHT, dpi).max(1) as u32
+    }
+}
+
+/// Recolors every pixel's RGB to `rgb`, preserving alpha — the win32 analog
+/// of a macOS template image (monochrome glyph; alpha is the coverage).
+pub(super) fn template_tint_rgba(rgba: &[u8], rgb: (u8, u8, u8)) -> Vec<u8> {
+    let mut out = rgba.to_vec();
+    for px in out.chunks_exact_mut(4) {
+        px[0] = rgb.0;
+        px[1] = rgb.1;
+        px[2] = rgb.2;
+    }
+    out
+}
+
 /// One GDI render pass. Returns `(rgba bytes, width, height)`; BGRA DIB data
 /// is converted to premultiplied-friendly straight RGBA with coverage-based
 /// alpha (the text is drawn white-on-zero, so each pixel's stored red channel
@@ -235,6 +265,15 @@ mod tests {
         assert_eq!(scaled(16, 96), 16);
         assert_eq!(scaled(16, 144), 24);
         assert_eq!(scaled(15, 192), 30);
+    }
+
+    #[test]
+    fn template_tint_replaces_rgb_and_preserves_alpha() {
+        let tinted = template_tint_rgba(&[200, 150, 100, 255, 10, 20, 30, 0], (16, 16, 16));
+        assert_eq!(tinted, vec![16, 16, 16, 255, 16, 16, 16, 0]);
+
+        let light = template_tint_rgba(&[0, 0, 0, 128], (240, 240, 240));
+        assert_eq!(light, vec![240, 240, 240, 128]);
     }
 
     /// Live GDI render, gated behind an env var so CI sessions without an
