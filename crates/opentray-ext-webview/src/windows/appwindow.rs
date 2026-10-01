@@ -1,7 +1,8 @@
 // Orthogonal intents (2026-07-14; original user request: restore Windows overlay controls):
 // 1. Discover a usable Windows App Runtime bootstrapper, including CBS installs.
 // 2. Keep runtime implementation DLLs on the package graph selected by the bootstrapper.
-// 3. Apply AppWindow titlebar overlay colors and read safe-area insets synchronously on the HWND-owning STA.
+// 3. Apply AppWindow titlebar overlay policy (colors, default drag-region removal) and read
+//    safe-area insets synchronously on the HWND-owning STA.
 // 4. (2026-09-28, win32-overlay-package-graph-fallback) Light up OS-provisioned (CBS)
 //    runtimes without any bootstrap DLL by adding the package to the process graph via
 //    the OS-public Package Dependency APIs — the same pair MddBootstrapInitialize wraps.
@@ -15,8 +16,8 @@ use windows::core::HSTRING;
 use windows::Win32::Security::PSID;
 use windows::Win32::Storage::Packaging::Appx::{
     AddPackageDependency, CreatePackageDependencyOptions, PackageDependencyLifetimeKind_Process,
-    PackageDependencyProcessorArchitectures_None, TryCreatePackageDependency, PACKAGE_VERSION,
-    PACKAGEDEPENDENCY_CONTEXT,
+    PackageDependencyProcessorArchitectures_None, TryCreatePackageDependency,
+    PACKAGEDEPENDENCY_CONTEXT, PACKAGE_VERSION,
 };
 use windows::Win32::System::LibraryLoader::{
     LoadLibraryExW, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
@@ -25,7 +26,9 @@ use windows_core::PCWSTR;
 use windows_sys::Win32::Foundation::{HMODULE, HWND};
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
-use super::appwindow_abi::{WindowsAppWindow, WindowsWindowId};
+use super::appwindow_abi::{
+    WindowsAppWindow, WindowsAppWindowTitleBar, WindowsRectInt32, WindowsWindowId,
+};
 use crate::{WebviewRuntimeError, WebviewWindowControlsOverlaySettings};
 
 static WINDOWS_APP_RUNTIME_BOOTSTRAPPED: AtomicBool = AtomicBool::new(false);
@@ -49,6 +52,9 @@ pub(super) fn apply_windows_titlebar_overlay(
     let app_window = app_window_for_hwnd(hwnd)?;
     let titlebar = app_window.titlebar()?;
     titlebar.set_extends_content_into_titlebar(true)?;
+    if let Err(error) = clear_default_titlebar_drag_region(&titlebar) {
+        eprintln!("opentray-ext-webview failed to clear the default titlebar drag region: {error}");
+    }
     if let Some(color) = overlay.button_background_color {
         titlebar.set_button_background_color(color)?;
     }
@@ -56,6 +62,30 @@ pub(super) fn apply_windows_titlebar_overlay(
         titlebar.set_button_foreground_color(color)?;
     }
     Ok(())
+}
+
+/// `ExtendsContentIntoTitlebar` without explicit drag rectangles claims the whole
+/// titlebar band (minus the system caption buttons) as non-client caption: mouse
+/// input there starts a window drag and never reaches the web content, so every
+/// interactive control a page places in the band is unclickable. Replacing the
+/// default region hands the band back to normal client input; dragging returns to
+/// the page-initiated `startAppRegionDrag` contract, matching the macOS overlay
+/// path where clicks are never intercepted either. Best-effort by design: a
+/// runtime that rejects both rect shapes keeps the previous whole-band behavior
+/// instead of failing the whole overlay over a drag nicety.
+fn clear_default_titlebar_drag_region(
+    titlebar: &WindowsAppWindowTitleBar,
+) -> Result<(), WebviewRuntimeError> {
+    titlebar
+        .set_drag_rectangles(&[WindowsRectInt32::default()])
+        .or_else(|_| {
+            titlebar.set_drag_rectangles(&[WindowsRectInt32 {
+                x: 2,
+                y: 2,
+                width: 1,
+                height: 1,
+            }])
+        })
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -227,7 +257,9 @@ fn add_cbs_package_graph_dependency() -> Result<(), String> {
         let dependency_id = match created {
             Ok(id) => id,
             Err(error) => {
-                failures.push(format!("TryCreatePackageDependency({family}) failed: {error}"));
+                failures.push(format!(
+                    "TryCreatePackageDependency({family}) failed: {error}"
+                ));
                 continue;
             }
         };
@@ -267,7 +299,9 @@ fn cbs_manifest_version(dir: &Path) -> (u16, u16, u16, u16) {
     let Some(end) = rest.find('"') else {
         return (0, 0, 0, 0);
     };
-    let mut parts = rest[..end].split('.').map(|part| part.parse::<u16>().unwrap_or(0));
+    let mut parts = rest[..end]
+        .split('.')
+        .map(|part| part.parse::<u16>().unwrap_or(0));
     (
         parts.next().unwrap_or(0),
         parts.next().unwrap_or(0),

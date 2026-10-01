@@ -16,6 +16,17 @@ pub(super) struct WindowsWindowId {
     value: u64,
 }
 
+/// `Microsoft.Foundation.RectInt32` — physical-pixel drag rectangle for
+/// `AppWindowTitleBar.SetDragRects`, window-client-relative.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct WindowsRectInt32 {
+    pub(super) x: i32,
+    pub(super) y: i32,
+    pub(super) width: i32,
+    pub(super) height: i32,
+}
+
 impl windows_core::TypeKind for WindowsWindowId {
     type TypeKind = windows_core::CopyType;
 }
@@ -149,6 +160,28 @@ impl WindowsAppWindowTitleBar {
         .map_err(|error| {
             WebviewRuntimeError::Unsupported(format!(
                 "Windows AppWindow titlebar overlay could not be applied: {error}"
+            ))
+        })
+    }
+
+    /// `AppWindowTitleBar.SetDragRects(rects)`. Replaces the default drag region —
+    /// which otherwise claims the whole titlebar band (minus caption buttons) as
+    /// non-client caption — with exactly `rects`.
+    pub(super) fn set_drag_rectangles(
+        &self,
+        rects: &[WindowsRectInt32],
+    ) -> Result<(), WebviewRuntimeError> {
+        unsafe {
+            (Interface::vtable(self).set_drag_rectangles)(
+                Interface::as_raw(self),
+                rects.len() as u32,
+                rects.as_ptr(),
+            )
+            .ok()
+        }
+        .map_err(|error| {
+            WebviewRuntimeError::Unsupported(format!(
+                "Windows AppWindow titlebar drag rectangles could not be applied: {error}"
             ))
         })
     }
@@ -328,5 +361,9 @@ pub struct IWindowsAppWindowTitleBar_Vtbl {
     right_inset:
         unsafe extern "system" fn(*mut core::ffi::c_void, *mut i32) -> windows_core::HRESULT,
     reset_to_default: usize,
-    set_drag_rectangles: usize,
+    set_drag_rectangles: unsafe extern "system" fn(
+        *mut core::ffi::c_void,
+        u32,
+        *const WindowsRectInt32,
+    ) -> windows_core::HRESULT,
 }
