@@ -40,3 +40,6 @@ packages/create/assets/create-openspec-template-iOS-Default-1024@1x.png
 
 # staged embedded native artifacts (never committed; produced by stage-release-artifacts)
 packages/*/platforms/
+
+# vendored path-dep tested standalone; its lock is a local artifact, consumers own the real lock
+vendor/tray-icon/Cargo.lock
