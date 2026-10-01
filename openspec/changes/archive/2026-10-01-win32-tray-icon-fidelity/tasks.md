@@ -5,5 +5,5 @@
 - [x] 1.3 opentray-spec：Win32Icon/LinuxIcon 支持 `isTemplate`（可选键，默认 false）+ round-trip 测试
 - [x] 1.4 backend projection：win32/linux icon-only 选择透传 `is_template`
 - [x] 1.5 `cargo test`（vendor + spec + backend）+ release 构建 + cp-bin
-- [ ] 1.6 skill-creator：win32 候选传 `isTemplate: true`；junction 联调，Owner 目检托盘（清晰度 + 亮暗纯色 + 主题翻转重渲染）
-- [ ] 1.7 两仓提交发布（changeset + 版本 bump + push-to-main CI）
+- [x] 1.6 skill-creator：win32 候选传 `isTemplate: true`；junction 联调，Owner 目检托盘（清晰度 + 亮暗纯色 + 主题翻转重渲染）
+- [x] 1.7 两仓提交发布（changeset + 版本 bump + push-to-main CI）
