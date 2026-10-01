@@ -1,5 +1,7 @@
 # @opentray/ext-clipboard
 
+## 0.33.7
+
 ## 0.33.6
 
 ## 0.33.5
