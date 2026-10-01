@@ -111,6 +111,7 @@ Useful smoke env vars:
 export OPENTRAY_EXAMPLE_EXIT_AFTER_MS=1500
 export OPENTRAY_EXAMPLE_WEBVIEW_SMOKE=1
 export OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE=1
+export OPENTRAY_EXAMPLE_WINDOW_REGION_SMOKE=1
 ```
 
 Every example entrypoint accepts `--release` / `-r` to use source-tree release
@@ -150,6 +151,7 @@ Command:
 pnpm --filter opentray example:webview-control
 pnpm --filter opentray example:webview-control -- --overlay
 pnpm --filter opentray example:webview-control -- --no-overlay
+OPENTRAY_EXAMPLE_WINDOW_REGION_SMOKE=1 OPENTRAY_EXAMPLE_EXIT_AFTER_MS=15000 pnpm --filter opentray example:webview-control -- --frameless --resizable
 ```
 
 Expected checks:
@@ -166,6 +168,7 @@ Expected checks:
 10. Title/icon controls update both the page state and native state.
 11. The Devtools section opens the native inspector through `navigator.opentrayWindow.devtools.open()`. On macOS, close/state buttons are enabled when supported in both debug and release mode; on Windows, close/state stay disabled because the runtime exposes only honest open support.
 12. By default, `getTitlebarAreaRect()` refreshes overlay geometry, and the explicit `Listen geometrychange` button controls whether `overlay.geometrychange` appears in the event log. With `--no-overlay`, the overlay panel should show the launch switch unchecked and report that `windowControlsOverlay` is disabled for this run.
+13. The window-region smoke (`OPENTRAY_EXAMPLE_WINDOW_REGION_SMOKE=1`) verifies the declarative `bindWindowRegion()` surface (auto/none/list behaviors, `setBehavior`, rebinding, `resize-<edge>` handles) and, on macOS, drives the internal `startSoftResize` frame to prove the native soft-resize session starts exactly on a frameless+resizable window (observed through `windowinteractionchange`). Run it with `--frameless --resizable` for the active-session leg and bare `--frameless` for the inactive-gate leg.
 
 Overlay is a show-time capability gate, not a runtime style. The control demo enables it by default because this is the overlay acceptance surface. You can force it on with `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=1` or force it off with `--no-overlay` / `OPENTRAY_EXAMPLE_WEBVIEW_OVERLAY=0`.
 

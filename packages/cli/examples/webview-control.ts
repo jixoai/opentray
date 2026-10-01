@@ -331,13 +331,105 @@ if (process.env.OPENTRAY_EXAMPLE_WEBVIEW_BRIDGE_SMOKE === "1") {
     });
   `);
   console.log("bridge smoke evaluate injected");
-  const bridgeSmoke = await waitForBridgeSmoke(webview, 5_000);
+  const bridgeSmoke = await waitForExampleSmoke(webview, "bridgeSmoke", 5_000);
   if (bridgeSmoke?.ok !== true) {
     throw new Error(
       `bridge smoke failed: ${bridgeSmoke?.title ?? "missing result"}`,
     );
   }
   console.log(`bridge smoke result: ${bridgeSmoke.title}`);
+}
+
+if (process.env.OPENTRAY_EXAMPLE_WINDOW_REGION_SMOKE === "1") {
+  await webview.evaluate(`
+    (async () => {
+      const bridge = navigator.opentrayWindow ?? navigator.window;
+      if (!bridge || typeof bridge.bindWindowRegion !== "function") {
+        throw new Error("bindWindowRegion is unavailable on the window bridge");
+      }
+      const capabilities = await bridge.getCapabilities();
+      // windowinteractionchange is the page-observable lifecycle event behind
+      // region-driven native sessions (drag and soft resize).
+      const interactions = [];
+      await bridge.listen("windowinteractionchange", (eventData) => {
+        interactions.push(eventData);
+      });
+      const region = document.createElement("div");
+      document.body.appendChild(region);
+      const handle = bridge.bindWindowRegion(region, "auto");
+      if (handle.behavior !== "auto") {
+        throw new Error("auto binding did not report its behavior");
+      }
+      handle.setBehavior("none");
+      if (handle.behavior !== "none") {
+        throw new Error("setBehavior('none') did not pause the binding");
+      }
+      handle.setBehavior(["move", "zoom"]);
+      if (handle.behavior[0] !== "move" || handle.behavior[1] !== "zoom") {
+        throw new Error("behavior list binding did not round-trip");
+      }
+      // Rebinding an element replaces its previous binding; a resize handle
+      // must bind without a platform TypeError (frameless gates the native
+      // session, not the API surface).
+      const resizeHandle = bridge.bindWindowRegion(region, "resize-top");
+      resizeHandle.unbind();
+      handle.unbind();
+      const style = await bridge.getStyle();
+      const sessionExpected = style.frameless === true && style.resizable === true;
+      if (capabilities.platform === "darwin") {
+        // Drive the internal startSoftResize frame exactly like the bound
+        // handle's pointerdown does; a frameless+resizable window must start
+        // the native session (observable as windowinteractionchange active).
+        window.ipc.postMessage(JSON.stringify({
+          namespace: "opentray.window.internal",
+          cmd: "startSoftResize",
+          callback: 0,
+          error: 0,
+          payload: { edge: "top" }
+        }));
+        const deadline = performance.now() + 3000;
+        let started = false;
+        while (performance.now() < deadline && !started) {
+          started = interactions.some((entry) => entry && entry.active === true);
+          if (!started) {
+            await new Promise((resolveWait) => { setTimeout(resolveWait, 50); });
+          }
+        }
+        if (sessionExpected !== started) {
+          throw new Error(
+            "darwin soft-resize session state mismatch: " +
+              JSON.stringify({ frameless: style.frameless, resizable: style.resizable, started })
+          );
+        }
+      }
+      return { sessionExpected };
+    })().then(
+      (result) => {
+        void navigator.opentray?.ipc?.postMessage?.({
+          type: "windowRegionSmoke",
+          ok: true,
+          sessionExpected: result.sessionExpected
+        });
+      },
+      (error) => {
+        void navigator.opentray?.ipc?.postMessage?.({
+          type: "windowRegionSmoke",
+          ok: false,
+          message: String(error?.message ?? error)
+        });
+      }
+    );
+  `);
+  console.log("window region smoke evaluate injected");
+  const windowRegionSmoke = await waitForExampleSmoke(webview, "windowRegionSmoke", 5_000);
+  if (windowRegionSmoke?.ok !== true) {
+    throw new Error(
+      `window region smoke failed: ${windowRegionSmoke?.message ?? "missing result"}`,
+    );
+  }
+  console.log(
+    `window region smoke ok: declarative binding verified (native session expected: ${windowRegionSmoke.sessionExpected})`,
+  );
 }
 
 tray.onMenuClick(({ itemId }) => {
@@ -438,42 +530,42 @@ function resolveResizable(args: readonly string[]): boolean | undefined {
   return value;
 }
 
-type BridgeSmokePayload = {
-  type: "bridgeSmoke";
+type ExampleSmokePayload = {
+  type: string;
   ok: boolean;
-  title: string;
+  [field: string]: unknown;
 };
 
-type BridgeSmokeWindow = {
+type ExampleSmokeWindow = {
   drainIpcMessages(): Promise<readonly { payload: unknown }[]>;
 };
 
-async function waitForBridgeSmoke(
-  window: BridgeSmokeWindow,
+/** Waits for a page smoke to report its verdict over the example IPC channel. */
+async function waitForExampleSmoke(
+  window: ExampleSmokeWindow,
+  type: string,
   timeoutMs: number,
-): Promise<BridgeSmokePayload | undefined> {
+): Promise<ExampleSmokePayload | undefined> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const bridgeSmoke = (await window.drainIpcMessages())
+    const smoke = (await window.drainIpcMessages())
       .map((message) => message.payload)
-      .find(isBridgeSmokePayload);
-    if (bridgeSmoke) {
-      return bridgeSmoke;
+      .find((payload): payload is ExampleSmokePayload => isExampleSmokePayload(payload, type));
+    if (smoke) {
+      return smoke;
     }
     await sleep(100);
   }
   return undefined;
 }
 
-function isBridgeSmokePayload(payload: unknown): payload is BridgeSmokePayload {
+function isExampleSmokePayload(payload: unknown, type: string): payload is ExampleSmokePayload {
   return (
     typeof payload === "object" &&
     payload !== null &&
     "type" in payload &&
     "ok" in payload &&
-    "title" in payload &&
-    payload.type === "bridgeSmoke" &&
-    typeof payload.ok === "boolean" &&
-    typeof payload.title === "string"
+    payload.type === type &&
+    typeof payload.ok === "boolean"
   );
 }
