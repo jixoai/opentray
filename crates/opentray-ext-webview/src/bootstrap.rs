@@ -40,6 +40,7 @@ pub(crate) fn webview_bridge_bootstrap_script(
             window_controls_overlay: false,
         },
         false,
+        false,
         NavigatorScreenSettings {
             enabled: policy.navigator_screen,
             bind_screen_globals: false,
@@ -114,6 +115,7 @@ pub(crate) fn favicon_observe_only_script() -> String {
 pub(crate) fn navigator_window_bootstrap_script(
     window_settings: NavigatorWindowSettings,
     soft_resize_enabled: bool,
+    window_region_resize_enabled: bool,
     screen_settings: NavigatorScreenSettings,
     tray_settings: NavigatorTraySettings,
     title_sync: MetadataSyncSettings,
@@ -127,6 +129,7 @@ pub(crate) fn navigator_window_bootstrap_script(
 ) -> String {
     let window_enabled = js_bool(window_settings.enabled);
     let soft_resize_enabled = js_bool(soft_resize_enabled);
+    let window_region_resize = js_bool(window_region_resize_enabled);
     let bind_window_globals = js_bool(window_settings.bind_window_globals);
     let window_controls_overlay = js_bool(window_settings.window_controls_overlay);
     let screen_enabled = js_bool(screen_settings.enabled);
@@ -146,6 +149,7 @@ pub(crate) fn navigator_window_bootstrap_script(
     r#"(function () {
   const requestedWindowEnabled = __OPENTRAY_WINDOW_ENABLED__;
   const requestedSoftResizeEnabled = __OPENTRAY_SOFT_RESIZE_ENABLED__;
+  const requestedWindowRegionResize = __OPENTRAY_WINDOW_REGION_RESIZE__;
   const requestedBindWindowGlobals = __OPENTRAY_BIND_GLOBALS__;
   const requestedWindowControlsOverlay = __OPENTRAY_WINDOW_CONTROLS_OVERLAY__;
   const requestedScreenEnabled = __OPENTRAY_SCREEN_ENABLED__;
@@ -285,6 +289,96 @@ pub(crate) fn navigator_window_bootstrap_script(
         payload: { edge }
       }));
     };
+    // ---- declarative window region binding (bindWindowRegion) ----
+    // Behaviors: 'auto' (platform caption semantics: move+zoom), 'none',
+    // 'move', 'zoom', and `resize-<edge>` handles. Element-bound only: a press
+    // triggers behavior when its target IS a bound element (strict match), so
+    // descendants stay ordinary page content unless independently bound.
+    const windowRegionResizeSupported = requestedWindowRegionResize;
+    const WINDOW_REGION_DOUBLE_CLICK_MS = 500;
+    const WINDOW_REGION_DOUBLE_CLICK_SLOP_PX = 6;
+    const WINDOW_REGION_RESIZE_EDGE = /^(top|right|bottom|left|top-left|top-right|bottom-left|bottom-right)$/;
+    const windowRegionBoundElements = new WeakMap();
+    const normalizeWindowRegionBehavior = (input) => {
+      const normalizedInput = input === undefined || input === null ? "auto" : input;
+      const list = Array.isArray(normalizedInput) ? normalizedInput : [normalizedInput];
+      const raw = Array.isArray(normalizedInput) ? normalizedInput : list[0];
+      if (list.length === 0) {
+        throw new TypeError("bindWindowRegion requires at least one behavior");
+      }
+      if (list.length === 1 && (list[0] === "auto" || list[0] === "none")) {
+        return { raw, behaviors: list[0] === "auto" ? ["move", "zoom"] : [] };
+      }
+      if (list.includes("auto") || list.includes("none")) {
+        throw new TypeError("'auto' and 'none' cannot combine with other window region behaviors");
+      }
+      const behaviors = [];
+      let resizeEdge = null;
+      for (const item of list) {
+        if (typeof item !== "string") {
+          throw new TypeError("window region behaviors must be strings");
+        }
+        if (item === "move" || item === "zoom") {
+          if (!behaviors.includes(item)) behaviors.push(item);
+          continue;
+        }
+        const resizeMatch = /^resize-(.+)$/.exec(item);
+        if (resizeMatch) {
+          if (!WINDOW_REGION_RESIZE_EDGE.test(resizeMatch[1])) {
+            throw new TypeError(`unsupported resize edge: ${resizeMatch[1]}`);
+          }
+          if (!windowRegionResizeSupported) {
+            throw new TypeError("resize window region behaviors are not supported on this platform");
+          }
+          if (resizeEdge !== null) {
+            throw new TypeError("bindWindowRegion accepts at most one resize edge");
+          }
+          resizeEdge = resizeMatch[1];
+          continue;
+        }
+        throw new TypeError(`unsupported window region behavior: ${item}`);
+      }
+      if (resizeEdge !== null) behaviors.push(`resize:${resizeEdge}`);
+      return { raw, behaviors };
+    };
+    const isWindowRegionElement = (value) =>
+      value !== null &&
+      typeof value === "object" &&
+      typeof value.addEventListener === "function" &&
+      typeof value.removeEventListener === "function";
+    const queryWindowRegionSelector = (root, selector) => {
+      if (!root || typeof root.querySelectorAll !== "function") {
+        throw new TypeError("window region root must provide querySelectorAll");
+      }
+      try {
+        return Array.from(root.querySelectorAll(selector));
+      } catch (_error) {
+        throw new TypeError(`invalid window region selector: ${selector}`);
+      }
+    };
+    const resolveWindowRegionTargets = (target) => {
+      if (isWindowRegionElement(target)) return [target];
+      if (Array.isArray(target)) {
+        if (target.length === 0) {
+          throw new TypeError("bindWindowRegion target array must not be empty");
+        }
+        if (target.some((item) => !isWindowRegionElement(item))) {
+          throw new TypeError("window region target arrays must contain only elements");
+        }
+        return Array.from(new Set(target));
+      }
+      if (typeof target === "string") {
+        return queryWindowRegionSelector(document, target);
+      }
+      if (target !== null && typeof target === "object" && typeof target.selector === "string") {
+        return queryWindowRegionSelector(target.root === undefined ? document : target.root, target.selector);
+      }
+      throw new TypeError(
+        "bindWindowRegion requires an element, element array, selector, or { root, selector }"
+      );
+    };
+    const windowRegionSoftResizeEdge = (edge) =>
+      edge.replace(/-(.)/g, (_match, char) => char.toUpperCase());
     document.addEventListener('pointermove', (event) => {
       setSoftResizeCursor(softResizeEdgeAt(event));
     }, true);
@@ -585,6 +679,91 @@ pub(crate) fn navigator_window_bootstrap_script(
         },
         stopAppRegionDrag() {
           return invoke("stopAppRegionDrag");
+        },
+        bindWindowRegion(target, options) {
+          const behaviorInput =
+            options !== null && typeof options === "object" && !Array.isArray(options)
+              ? options.behavior
+              : options;
+          const initial = normalizeWindowRegionBehavior(behaviorInput);
+          const state = { raw: initial.raw, behaviors: initial.behaviors, lastPress: null };
+          const targets = resolveWindowRegionTargets(target);
+          const entries = targets.map((element) => {
+            const listener = (event) => {
+              if (event.target !== element) return;
+              if (event.isTrusted !== true || event.isPrimary === false || event.button !== 0) return;
+              const behaviors = state.behaviors;
+              if (behaviors.length === 0) return;
+              const resizeEntry = behaviors.find((item) => item.startsWith("resize:"));
+              if (resizeEntry !== undefined) {
+                event.preventDefault();
+                postSoftResizeStart(windowRegionSoftResizeEdge(resizeEntry.slice("resize:".length)));
+                return;
+              }
+              const now =
+                window.performance && typeof window.performance.now === "function"
+                  ? window.performance.now()
+                  : Date.now();
+              if (behaviors.includes("zoom")) {
+                const previous = state.lastPress;
+                state.lastPress = null;
+                if (
+                  previous !== null &&
+                  now - previous.t <= WINDOW_REGION_DOUBLE_CLICK_MS &&
+                  Math.abs(event.clientX - previous.x) <= WINDOW_REGION_DOUBLE_CLICK_SLOP_PX &&
+                  Math.abs(event.clientY - previous.y) <= WINDOW_REGION_DOUBLE_CLICK_SLOP_PX
+                ) {
+                  invoke("getWindowState")
+                    .then((snapshot) =>
+                      snapshot && snapshot.state === "maximized"
+                        ? invoke("restore")
+                        : invoke("maximize")
+                    )
+                    .catch(() => {});
+                  return;
+                }
+                state.lastPress = { t: now, x: event.clientX, y: event.clientY };
+              }
+              if (behaviors.includes("move")) {
+                invoke("startAppRegionDrag", {
+                  x: event.clientX,
+                  y: event.clientY,
+                  pointerId: event.pointerId
+                }).catch(() => {});
+              }
+            };
+            element.addEventListener("pointerdown", listener);
+            const detachElement = () => {
+              if (windowRegionBoundElements.get(element) === detachElement) {
+                windowRegionBoundElements.delete(element);
+              }
+              element.removeEventListener("pointerdown", listener);
+            };
+            const previousDetach = windowRegionBoundElements.get(element);
+            if (typeof previousDetach === "function") previousDetach();
+            windowRegionBoundElements.set(element, detachElement);
+            return detachElement;
+          });
+          let detached = false;
+          const detach = () => {
+            if (detached) return;
+            detached = true;
+            for (const detachElement of entries) detachElement();
+          };
+          return Object.freeze({
+            unbind() {
+              detach();
+            },
+            setBehavior(input) {
+              const next = normalizeWindowRegionBehavior(input);
+              state.raw = next.raw;
+              state.behaviors = next.behaviors;
+              state.lastPress = null;
+            },
+            get behavior() {
+              return state.raw;
+            }
+          });
         },
         getStyle() {
           return invoke("getStyle");
@@ -1169,6 +1348,7 @@ pub(crate) fn navigator_window_bootstrap_script(
 })();"#
         .replace("__OPENTRAY_WINDOW_ENABLED__", window_enabled)
         .replace("__OPENTRAY_SOFT_RESIZE_ENABLED__", soft_resize_enabled)
+        .replace("__OPENTRAY_WINDOW_REGION_RESIZE__", window_region_resize)
         .replace("__OPENTRAY_BIND_GLOBALS__", bind_window_globals)
         .replace("__OPENTRAY_WINDOW_CONTROLS_OVERLAY__", window_controls_overlay)
         .replace("__OPENTRAY_SCREEN_ENABLED__", screen_enabled)
@@ -1374,7 +1554,411 @@ return await rectPromise;
         assert_eq!(runtime["height"], Value::from(0));
     }
 
-    fn overlay_bootstrap_script() -> String {
+    #[test]
+    fn window_region_default_behavior_moves_on_direct_press() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const makeElement = () => {
+  const listeners = [];
+  return {
+    listeners,
+    addEventListener(type, listener) { listeners.push({ type, listener }); },
+    removeEventListener(type, listener) {
+      const index = listeners.findIndex((entry) => entry.type === type && entry.listener === listener);
+      if (index >= 0) listeners.splice(index, 1);
+    }
+  };
+};
+const element = makeElement();
+const handle = navigator.opentrayWindow.bindWindowRegion(element);
+const press = (target) => {
+  for (const { listener } of element.listeners) {
+    listener({
+      isTrusted: true,
+      isPrimary: true,
+      button: 0,
+      target,
+      clientX: 120,
+      clientY: 16,
+      pointerId: 3,
+      preventDefault() {}
+    });
+  }
+};
+press(element);
+press({ child: true });
+return {
+  behavior: handle.behavior,
+  dragRequests: messages
+    .filter((message) => message.cmd === "startAppRegionDrag")
+    .map((message) => ({ namespace: message.namespace, payload: message.payload }))
+};
+"#,
+        );
+
+        // Default 'auto' resolves to the caption pair; only the press whose
+        // target IS the bound element triggers behavior.
+        assert_eq!(runtime["behavior"], Value::String("auto".to_string()));
+        let requests = runtime["dragRequests"]
+            .as_array()
+            .expect("drag requests array");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0]["namespace"],
+            Value::String("opentray.window".to_string())
+        );
+        assert_eq!(requests[0]["payload"]["x"], Value::from(120));
+        assert_eq!(requests[0]["payload"]["pointerId"], Value::from(3));
+    }
+
+    #[test]
+    fn window_region_double_click_pairs_into_zoom_toggle() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const makeElement = () => {
+  const listeners = [];
+  return {
+    listeners,
+    addEventListener(type, listener) { listeners.push({ type, listener }); },
+    removeEventListener(type, listener) {
+      const index = listeners.findIndex((entry) => entry.type === type && entry.listener === listener);
+      if (index >= 0) listeners.splice(index, 1);
+    }
+  };
+};
+const element = makeElement();
+navigator.opentrayWindow.bindWindowRegion(element, { behavior: "auto" });
+let clock = 0;
+window.performance = { now: () => clock };
+const press = (x, y) => {
+  for (const { listener } of element.listeners) {
+    listener({
+      isTrusted: true,
+      isPrimary: true,
+      button: 0,
+      target: element,
+      clientX: x,
+      clientY: y,
+      pointerId: 1,
+      preventDefault() {}
+    });
+  }
+};
+press(40, 10);
+clock += 200;
+press(42, 12);
+const stateRequest = messages.find((message) => message.cmd === "getWindowState");
+window.__OPENTRAY_WINDOW_INTERNALS__.runCallback(stateRequest.callback, { state: "normal" });
+await new Promise((resolve) => setTimeout(resolve, 20));
+return {
+  dragCount: messages.filter((message) => message.cmd === "startAppRegionDrag").length,
+  stateAsked: Boolean(stateRequest),
+  maximized: messages.some((message) => message.cmd === "maximize"),
+  restored: messages.some((message) => message.cmd === "restore")
+};
+"#,
+        );
+
+        // First press of the pair drags; the second zooms via state dispatch.
+        assert_eq!(runtime["dragCount"], Value::from(1));
+        assert_eq!(runtime["stateAsked"], Value::Bool(true));
+        assert_eq!(runtime["maximized"], Value::Bool(true));
+        assert_eq!(runtime["restored"], Value::Bool(false));
+    }
+
+    #[test]
+    fn window_region_expired_or_moved_press_does_not_pair() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const makeElement = () => {
+  const listeners = [];
+  return {
+    listeners,
+    addEventListener(type, listener) { listeners.push({ type, listener }); },
+    removeEventListener(type, listener) {}
+  };
+};
+const element = makeElement();
+navigator.opentrayWindow.bindWindowRegion(element, "auto");
+let clock = 0;
+window.performance = { now: () => clock };
+const press = (x, y) => {
+  for (const { listener } of element.listeners) {
+    listener({
+      isTrusted: true, isPrimary: true, button: 0, target: element,
+      clientX: x, clientY: y, pointerId: 1, preventDefault() {}
+    });
+  }
+};
+press(10, 10);
+clock += 900;
+press(12, 10);
+press(500, 10);
+return {
+  dragCount: messages.filter((message) => message.cmd === "startAppRegionDrag").length,
+  stateAsked: messages.some((message) => message.cmd === "getWindowState")
+};
+"#,
+        );
+
+        // Expired pair and far-away press both stay plain moves; no zoom query.
+        assert_eq!(runtime["dragCount"], Value::from(3));
+        assert_eq!(runtime["stateAsked"], Value::Bool(false));
+    }
+
+    #[test]
+    fn window_region_resize_handle_posts_internal_soft_resize() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const makeElement = () => {
+  const listeners = [];
+  return {
+    listeners,
+    addEventListener(type, listener) { listeners.push({ type, listener }); },
+    removeEventListener(type, listener) {}
+  };
+};
+const element = makeElement();
+const handle = navigator.opentrayWindow.bindWindowRegion(element, "resize-bottom-right");
+let prevented = false;
+for (const { listener } of element.listeners) {
+  listener({
+    isTrusted: true, isPrimary: true, button: 0, target: element,
+    clientX: 8, clientY: 300, pointerId: 1,
+    preventDefault() { prevented = true; }
+  });
+}
+return {
+  behavior: handle.behavior,
+  prevented,
+  softResize: messages
+    .filter((message) => message.cmd === "startSoftResize")
+    .map((message) => ({ namespace: message.namespace, edge: message.payload.edge }))
+};
+"#,
+        );
+
+        assert_eq!(
+            runtime["behavior"],
+            Value::String("resize-bottom-right".to_string())
+        );
+        assert_eq!(runtime["prevented"], Value::Bool(true));
+        let requests = runtime["softResize"].as_array().expect("soft resize array");
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0]["namespace"],
+            Value::String("opentray.window.internal".to_string())
+        );
+        // kebab-case behavior edges normalize to the bridge's camelCase vocabulary.
+        assert_eq!(
+            requests[0]["edge"],
+            Value::String("bottomRight".to_string())
+        );
+    }
+
+    #[test]
+    fn window_region_resize_rejected_where_unsupported() {
+        let runtime = run_node_probe(
+            &window_region_bootstrap_script(false),
+            r#"
+const element = {
+  listeners: [],
+  addEventListener(type, listener) { this.listeners.push(listener); },
+  removeEventListener() {}
+};
+try {
+  navigator.opentrayWindow.bindWindowRegion(element, ["move", "resize-top-left"]);
+  return { error: null };
+} catch (error) {
+  return { error: String(error) };
+}
+"#,
+        );
+
+        let error = runtime["error"].as_str().expect("bind error message");
+        assert!(error.contains("not supported"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn window_region_behavior_validation_rejects_bad_input() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const element = {
+  addEventListener() {},
+  removeEventListener() {}
+};
+const attempt = (input) => {
+  try {
+    navigator.opentrayWindow.bindWindowRegion(element, input);
+    return null;
+  } catch (error) {
+    return String(error);
+  }
+};
+return {
+  bareResize: attempt("resize"),
+  badEdge: attempt("resize-middle"),
+  mixedNone: attempt(["move", "none"]),
+  mixedAuto: attempt(["auto", "zoom"]),
+  emptyArray: attempt([]),
+  nonString: attempt([42])
+};
+"#,
+        );
+
+        for key in [
+            "bareResize",
+            "badEdge",
+            "mixedNone",
+            "mixedAuto",
+            "emptyArray",
+            "nonString",
+        ] {
+            let error = runtime[key]
+                .as_str()
+                .unwrap_or_else(|| panic!("bindWindowRegion accepted invalid input for {key}"));
+            assert!(
+                error.contains("TypeError"),
+                "unexpected error for {key}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn window_region_set_behavior_none_pauses_and_restores() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const makeElement = () => {
+  const listeners = [];
+  return {
+    listeners,
+    addEventListener(type, listener) { listeners.push({ type, listener }); },
+    removeEventListener() {}
+  };
+};
+const element = makeElement();
+const handle = navigator.opentrayWindow.bindWindowRegion(element, "auto");
+const press = () => {
+  for (const { listener } of element.listeners) {
+    listener({
+      isTrusted: true, isPrimary: true, button: 0, target: element,
+      clientX: 5, clientY: 5, pointerId: 1, preventDefault() {}
+    });
+  }
+};
+press();
+handle.setBehavior("none");
+press();
+handle.setBehavior("move");
+press();
+return {
+  behavior: handle.behavior,
+  dragCount: messages.filter((message) => message.cmd === "startAppRegionDrag").length
+};
+"#,
+        );
+
+        assert_eq!(runtime["behavior"], Value::String("move".to_string()));
+        assert_eq!(runtime["dragCount"], Value::from(2));
+    }
+
+    #[test]
+    fn window_region_rebind_replaces_previous_binding() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const makeElement = () => {
+  const listeners = [];
+  return {
+    listeners,
+    addEventListener(type, listener) { listeners.push({ type, listener }); },
+    removeEventListener(type, listener) {
+      const index = listeners.findIndex((entry) => entry.listener === listener);
+      if (index >= 0) listeners.splice(index, 1);
+    }
+  };
+};
+const element = makeElement();
+const first = navigator.opentrayWindow.bindWindowRegion(element, "auto");
+const second = navigator.opentrayWindow.bindWindowRegion(element, "move");
+const press = () => {
+  for (const { listener } of element.listeners) {
+    listener({
+      isTrusted: true, isPrimary: true, button: 0, target: element,
+      clientX: 7, clientY: 7, pointerId: 1, preventDefault() {}
+    });
+  }
+};
+press();
+first.unbind();
+return {
+  listenerCount: element.listeners.length,
+  dragCount: messages.filter((message) => message.cmd === "startAppRegionDrag").length
+};
+"#,
+        );
+
+        // The second bind detached the first element listener; one press posts once.
+        assert_eq!(runtime["listenerCount"], Value::from(1));
+        assert_eq!(runtime["dragCount"], Value::from(1));
+    }
+
+    #[test]
+    fn window_region_selector_targets_snapshot_and_rejects_invalid_selectors() {
+        let runtime = run_node_probe(
+            &overlay_bootstrap_script(),
+            r#"
+const makeElement = () => ({
+  listeners: [],
+  addEventListener(type, listener) { this.listeners.push(listener); },
+  removeEventListener() {}
+});
+const strip = makeElement();
+const icon = makeElement();
+document.querySelectorAll = (selector) => {
+  if (selector === ".bad[") {
+    // The real DOM rejects unparsable selectors; the stub must model that.
+    throw new Error("not a valid selector");
+  }
+  return selector === ".titlebar > *" ? [strip, icon] : [];
+};
+const handle = navigator.opentrayWindow.bindWindowRegion(".titlebar > *", "move");
+const noMatch = navigator.opentrayWindow.bindWindowRegion(".missing", "move");
+let invalidError = null;
+try {
+  navigator.opentrayWindow.bindWindowRegion(".bad[", "move");
+} catch (error) {
+  invalidError = String(error);
+}
+return {
+  boundCount: strip.listeners.length + icon.listeners.length,
+  noMatchBehavior: noMatch.behavior,
+  invalidError
+};
+"#,
+        );
+
+        assert_eq!(runtime["boundCount"], Value::from(2));
+        assert_eq!(
+            runtime["noMatchBehavior"],
+            Value::String("move".to_string())
+        );
+        let error = runtime["invalidError"]
+            .as_str()
+            .expect("invalid selector error");
+        assert!(
+            error.contains("invalid window region selector"),
+            "unexpected: {error}"
+        );
+    }
+
+    fn window_region_bootstrap_script(window_region_resize: bool) -> String {
         navigator_window_bootstrap_script(
             NavigatorWindowSettings {
                 enabled: true,
@@ -1382,6 +1966,7 @@ return await rectPromise;
                 window_controls_overlay: true,
             },
             false,
+            window_region_resize,
             NavigatorScreenSettings::default(),
             NavigatorTraySettings::default(),
             MetadataSyncSettings::default(),
@@ -1393,6 +1978,10 @@ return await rectPromise;
             "default",
             false,
         )
+    }
+
+    fn overlay_bootstrap_script() -> String {
+        window_region_bootstrap_script(true)
     }
 
     fn channel_bootstrap_script() -> String {

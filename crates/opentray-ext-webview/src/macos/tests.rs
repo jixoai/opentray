@@ -110,6 +110,7 @@ fn bootstrap_script_with_policy(
     navigator_window_bootstrap_script(
         window_settings,
         false,
+        true,
         screen_settings,
         tray_settings,
         title_sync,
@@ -130,6 +131,7 @@ fn bootstrap_script_with_permission_policy(
     navigator_window_bootstrap_script(
         NavigatorWindowSettings::default(),
         false,
+        true,
         NavigatorScreenSettings::default(),
         NavigatorTraySettings::default(),
         MetadataSyncSettings::default(),
@@ -2636,6 +2638,7 @@ fn channel_bootstrap_script(
     navigator_window_bootstrap_script(
         NavigatorWindowSettings::default(),
         false,
+        true,
         NavigatorScreenSettings::default(),
         NavigatorTraySettings::default(),
         MetadataSyncSettings::default(),

@@ -139,7 +139,7 @@ macOS support includes:
 - keep-on-top window level on macOS
 - whole-window opacity through `style.opacity`
 - titlebar overlay geometry through `navigator.opentrayWindow.overlay`
-- native app-region dragging through `startAppRegionDrag()`
+- native app-region dragging through `startAppRegionDrag()` and declarative window regions through `bindWindowRegion()`
 - minimize, maximize, and restore window-state controls
 - operational visibility through `isClosed()`, `isVisible()`, `toVisible()`, and `visibleChange`
 - explicit foreground activation through `focus()`
@@ -391,6 +391,7 @@ The injected capability follows a typed facade, with a raw `invoke(cmd, payload)
 - `await navigator.window.devtools.open()`, `close()`, and `isOpen()` when the session was created with `devtools: true`
 - `await navigator.opentrayWindow.overlay.getTitlebarAreaRect()`
 - `await navigator.opentrayWindow.startAppRegionDrag()`
+- `navigator.opentrayWindow.bindWindowRegion(titlebar, "auto")`
 - `await navigator.window.setTitle("OpenTray Status")`
 - `await navigator.window.setIcon({ type: "href", href: "/favicon.ico" })`
 - `await navigator.window.setIcon(null)` to clear the logical native icon
@@ -721,16 +722,28 @@ keeps its native transparent controls and accepts the same declaration without e
 Windows buttons. The overlay safe area always comes from native titlebar insets; do not estimate
 its width from a fixed caption-button count.
 
-In the page, use overlay geometry to avoid native window controls and start native dragging from your custom titlebar:
+In the page, use overlay geometry to avoid native window controls and bind your custom titlebar as a window region:
 
 ```ts
 const pageWindow = navigator.opentrayWindow;
 const rect = await pageWindow.overlay?.getTitlebarAreaRect();
 customTitlebar.style.paddingLeft = `${rect?.x ?? 0}px`;
-customTitlebar.addEventListener("pointerdown", () => {
-  void pageWindow.startAppRegionDrag();
-});
+const titlebarRegion = pageWindow.bindWindowRegion(customTitlebar, "auto");
+// titlebarRegion.unbind() detaches; titlebarRegion.setBehavior("none") pauses.
 ```
+
+`bindWindowRegion(el, behavior)` is the declarative layer over the imperative
+`startAppRegionDrag()` primitive: `'auto'` (the default) gives an element native
+caption semantics — move on press, zoom (double-click maximize/restore) on a
+paired double press. `'move'`-only strips zoom for reposition strips;
+`` `resize-${edge}` `` turns an element into a resize handle for frameless
+windows (`resize-bottom-right`, `resize-top`, …; not every platform implements
+resize yet — binding throws where unsupported). Only presses whose target IS
+the bound element trigger behavior, so buttons and other descendants keep their
+normal interactivity; decorative children can use `pointer-events: none` so
+presses land on the region element. Targets may also be an element array, a
+selector string, or `{ root, selector }`; selector matches are a bind-time
+snapshot and rebinding an element replaces its previous binding.
 
 Borderless glass shell:
 

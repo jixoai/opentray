@@ -137,7 +137,9 @@ For tray-anchored panels, prefer `getBounds()` as the source of truth after user
 
 ## Overlay and Frameless Guidance
 
-Do not auto-inject titlebars, drag strips, or CSS into the user's HTML. For overlay titlebars, explain that the page should deliberately read `navigator.opentrayWindow.overlay.getTitlebarAreaRect()` and bind native drag behavior with `startAppRegionDrag()` where the product wants drag. For borderless panels, remind the user that once native controls disappear, their app owns controls, focus states, and accessibility.
+Do not auto-inject titlebars, drag strips, or CSS into the user's HTML. For overlay titlebars, explain that the page should deliberately read `navigator.opentrayWindow.overlay.getTitlebarAreaRect()` and then bind titlebar behavior declaratively with `bindWindowRegion(el, "auto")` — the platform layer owns move, double-click maximize/restore zoom, and `resize-<edge>` handles. Reach for the imperative `startAppRegionDrag()` only when a product needs custom per-press gesture logic. For borderless panels, remind the user that once native controls disappear, their app owns controls, focus states, and accessibility.
+
+Region semantics to teach: only presses whose target IS the bound element trigger behavior (bind interactive descendants independently, or give decorative children `pointer-events: none`); `'auto'` = platform caption semantics (move + zoom today), `'none'` pauses via `handle.setBehavior`, `` `resize-${edge}` `` handles require frameless windows and throw where the platform lacks them; selector/array/shadow-root targets snapshot at bind time and rebinding an element replaces its previous binding.
 
 ### Control-Safe Overlay Titlebar
 

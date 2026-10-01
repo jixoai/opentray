@@ -437,6 +437,43 @@ export interface WebviewWindowDevtools {
   isOpen(): Promise<boolean>;
 }
 
+/** Physical window edges a `resize-<edge>` region handle can drive. */
+export type WindowRegionEdge =
+  | "top"
+  | "right"
+  | "bottom"
+  | "left"
+  | "top-left"
+  | "top-right"
+  | "bottom-left"
+  | "bottom-right";
+
+/** Window-chrome behaviors a bound region can carry. */
+export type WindowRegionBehavior =
+  | "auto"
+  | "none"
+  | "move"
+  | "zoom"
+  | `resize-${WindowRegionEdge}`;
+
+export type WindowRegionBehaviorInput =
+  | WindowRegionBehavior
+  | WindowRegionBehavior[];
+
+/** What `bindWindowRegion` accepts as a region target. */
+export type WindowRegionTarget =
+  | HTMLElement
+  | HTMLElement[]
+  | string
+  | { root?: ParentNode; selector: string };
+
+/** Live binding returned by `bindWindowRegion`. */
+export interface WebviewWindowRegionHandle {
+  unbind(): void;
+  setBehavior(behavior: WindowRegionBehaviorInput): void;
+  readonly behavior: WindowRegionBehaviorInput;
+}
+
 export interface WebviewNavigatorWindow {
   readonly overlay?: WebviewWindowOverlay;
   readonly devtools: WebviewWindowDevtools;
@@ -482,6 +519,29 @@ export interface WebviewNavigatorWindow {
     pointerId?: number;
   }): Promise<{ active: boolean }>;
   stopAppRegionDrag(): Promise<{ active: boolean }>;
+  /**
+   * Declarative window-region binding: wires pointer behavior onto DOM
+   * elements so they act like native window chrome. Only presses whose target
+   * IS a bound element trigger behavior — descendants stay ordinary page
+   * content unless independently bound (decorative children can use
+   * `pointer-events: none` so presses land on the region element).
+   *
+   * - `'auto'` (default): platform caption semantics — currently move + zoom
+   *   (double-click toggles maximize/restore).
+   * - `'none'`: inert; `setBehavior('none')` pauses without unbinding.
+   * - `'move'`: native window drag per press.
+   * - `'zoom'`: double-click pairs into a maximize/restore toggle.
+   * - `` `resize-${edge}` ``: element acts as a resize handle (frameless
+   *   windows; edges `top`…`bottom-right`).
+   *
+   * The target may be an element, an element array, a selector string, or
+   * `{ root, selector }` for shadow-root scoping. Selector matches are a
+   * bind-time snapshot; rebinding an element replaces its previous binding.
+   */
+  bindWindowRegion(
+    target: WindowRegionTarget,
+    options?: WindowRegionBehaviorInput | { behavior?: WindowRegionBehaviorInput }
+  ): WebviewWindowRegionHandle;
   getStyle(): Promise<WebviewWindowStyle>;
   setStyle(style: WebviewWindowStylePatch): Promise<WebviewWindowStyle>;
   setBackground(

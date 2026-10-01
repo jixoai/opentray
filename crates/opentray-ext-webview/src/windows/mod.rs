@@ -2439,6 +2439,7 @@ fn build_webview(
         .with_initialization_script(navigator_window_bootstrap_script(
             navigator_window,
             soft_resize_enabled,
+            true,
             navigator_screen,
             navigator_tray,
             sync_title,

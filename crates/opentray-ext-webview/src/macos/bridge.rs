@@ -28,8 +28,9 @@ use super::{
     style::{apply_window_style, normalize_corner_radius, validate_style_request, SetStylePayload},
     window_state::{window_is_closed, window_is_visible, window_state_json},
     NavigatorWindowBridge, NavigatorWindowListener, WindowSizeConstraints, COMMAND_NAMESPACE,
-    PAGE_IPC_NAMESPACE, PERMISSIONS_NAMESPACE, PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE,
-    TRAY_NAMESPACE, WEBVIEW_CHANNEL_NAMESPACE, WINDOW_INTERNALS_GLOBAL, WINDOW_NAMESPACE,
+    PAGE_IPC_NAMESPACE, PERMISSIONS_NAMESPACE, PRIVATE_SOFT_RESIZE_NAMESPACE,
+    PRIVATE_SYNC_NAMESPACE, SCREEN_NAMESPACE, TRAY_NAMESPACE, WEBVIEW_CHANNEL_NAMESPACE,
+    WINDOW_INTERNALS_GLOBAL, WINDOW_NAMESPACE,
 };
 
 struct MainThreadWebView(usize);
@@ -162,6 +163,7 @@ pub(super) fn handle_navigator_window_request(
             && request.namespace != PERMISSIONS_NAMESPACE
             && request.namespace != COMMAND_NAMESPACE
             && request.namespace != PRIVATE_SYNC_NAMESPACE
+            && request.namespace != PRIVATE_SOFT_RESIZE_NAMESPACE
             && request.namespace != WEBVIEW_CHANNEL_NAMESPACE
         {
             return;
@@ -210,6 +212,9 @@ pub(super) fn handle_navigator_window_request(
         COMMAND_NAMESPACE => dispatch_page_exec_command(&request.cmd, request.payload),
         PRIVATE_SYNC_NAMESPACE => {
             dispatch_private_sync_command(bridge, window, &request.cmd, request.payload)
+        }
+        PRIVATE_SOFT_RESIZE_NAMESPACE => {
+            dispatch_private_soft_resize_command(bridge, window, &request.cmd, request.payload)
         }
         // The per-webview channel namespace is bridge-policy-gated inside
         // its dispatcher (not page_access-gated): the surface exists only
@@ -1093,6 +1098,7 @@ pub(super) fn close_window(
 ) -> Result<(), WebviewRuntimeError> {
     let was_visible = window_is_visible(window);
     bridge.borrow_mut().app_region_drag.stop();
+    bridge.borrow_mut().soft_resize.stop();
     window.orderOut(None);
     notify_window_closed(bridge)?;
     emit_visible_change_if_needed(bridge, window, was_visible)
@@ -1469,6 +1475,40 @@ fn dispatch_private_sync_command(
         }
         other => Err(WebviewRuntimeError::Rejected(format!(
             "unsupported private sync command: {other}"
+        ))),
+    }
+}
+
+#[derive(Deserialize)]
+struct SoftResizePayload {
+    edge: String,
+}
+
+/// The private soft-resize namespace behind `bindWindowRegion` resize handles.
+/// Frameless-gated exactly like its Windows twin: framed windows already own
+/// native resize borders.
+fn dispatch_private_soft_resize_command(
+    bridge: &Rc<RefCell<NavigatorWindowBridge>>,
+    window: &Retained<NSWindow>,
+    cmd: &str,
+    payload: Value,
+) -> Result<Value, WebviewRuntimeError> {
+    match cmd {
+        "startSoftResize" => {
+            let payload: SoftResizePayload = serde_json::from_value(payload).map_err(|error| {
+                WebviewRuntimeError::Rejected(format!("startSoftResize requires edge: {error}"))
+            })?;
+            let edge =
+                super::soft_resize::SoftResizeEdge::parse(&payload.edge).ok_or_else(|| {
+                    WebviewRuntimeError::Rejected(format!(
+                        "unsupported soft resize edge: {}",
+                        payload.edge
+                    ))
+                })?;
+            bridge.borrow_mut().soft_resize.start(window, bridge, edge)
+        }
+        other => Err(WebviewRuntimeError::Rejected(format!(
+            "unsupported private soft resize command: {other}"
         ))),
     }
 }

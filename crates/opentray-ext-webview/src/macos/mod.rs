@@ -26,6 +26,7 @@ mod overlay;
 mod policy;
 mod popups;
 mod screen;
+mod soft_resize;
 mod style;
 mod window_delegate;
 mod window_state;
@@ -98,6 +99,7 @@ use self::overlay::emit_overlay_geometry_change_if_enabled;
 use self::policy::{resolve_page_access, update_page_access_for_url};
 use self::popups::{new_window_handler, PopupOpenConfig, SharedPopupLedger};
 use self::screen::screen_details_json;
+use self::soft_resize::SoftResizeState;
 use self::style::{
     apply_window_style, framed_window_style_mask, supported_background_effects,
     validate_initial_style, WindowStyleState,
@@ -112,6 +114,7 @@ const PAGE_IPC_NAMESPACE: &str = "opentray.ipc";
 const PERMISSIONS_NAMESPACE: &str = "opentray.permissions";
 const COMMAND_NAMESPACE: &str = "opentray.command";
 const PRIVATE_SYNC_NAMESPACE: &str = "opentray.window.sync";
+const PRIVATE_SOFT_RESIZE_NAMESPACE: &str = "opentray.window.internal";
 /// Page bridge namespace of the per-webview surface (D9/D2): the source
 /// webview id rides the ipc transport itself, so page-originated channel
 /// commands are scoped to the view the page lives in.
@@ -479,6 +482,7 @@ pub(super) struct NavigatorWindowBridge {
     navigator_tray: NavigatorTraySettings,
     metadata: WindowMetadataState,
     app_region_drag: AppRegionDragState,
+    soft_resize: SoftResizeState,
     devtools_enabled: bool,
     download: WebviewDownloadSettings,
     native_api_policy: WebviewNativeApiPolicy,
@@ -2200,6 +2204,7 @@ impl MacosWebviewRuntime {
                 sync_icon: show_settings.window.sync.icon,
             },
             app_region_drag: AppRegionDragState::default(),
+            soft_resize: SoftResizeState::default(),
             devtools_enabled: show_settings.window.devtools,
             download: show_settings.download,
             native_api_policy: show_settings.native_api_policy.clone(),
@@ -2383,6 +2388,7 @@ impl MacosWebviewRuntime {
             .with_initialization_script(navigator_window_bootstrap_script(
                 show_settings.navigator_window,
                 false,
+                true,
                 show_settings.navigator_screen,
                 show_settings.navigator_tray,
                 show_settings.window.sync.title,
@@ -2568,6 +2574,7 @@ impl MacosWebviewRuntime {
                 .drain_host_events();
             self.pending_channel_events.extend(events);
             session.bridge.borrow_mut().app_region_drag.stop();
+            session.bridge.borrow_mut().soft_resize.stop();
             session.window.setDelegate(None);
             session.window.close();
         }
