@@ -27,6 +27,8 @@ The `opentray` package re-exports common application types: `CreateTrayOptions`,
 
 `primaryEvent` is an additive role on a normal menu item. It still emits `menuClick`, so handle it through item-local `onMenuClick` for simple commands or `tray.onMenuClick(...)` for centralized routing. Use `tray.onTrayClick(...)` for independent raw tray-icon clicks. Do not create a separate `bindPrimaryEvent` API unless the event ontology changes.
 
+Tray icon platform truth: the platform-specific icon candidates (`darwin-icon-only` / `darwin-icon-text`, `win32-icon-only`) accept `isTemplate` — on Windows (since 0.33.7) the glyph re-tints to the current taskbar theme color and follows system theme flips, the analog of the macOS template image. Text-bearing icons also render natively on Windows (since 0.33.3): a `text-only` tray rasterizes a theme-aware glyph, but only when no explicit image icon is set — an explicit image icon always wins over the title render.
+
 ## Typical Shape
 
 ```ts

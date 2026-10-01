@@ -1,11 +1,12 @@
 <!--
-Orthogonal intents (maintained 2026-09-18; established by the add-ext-notification change):
+Orthogonal intents (maintained 2026-10-01; established by the add-ext-notification change;
+intent 2 amended for the 0.33.3 win32 WinRT-toast delivery):
 1. Route package consumers to OS-standard notifications (title/body) for host-side
    callers without a visible page.
 2. Preserve platform truth: darwin UNUserNotificationCenter with real user authorization
    and 10s deferred-timeout semantics; win32 as an always-granted composition-layer
-   bridge that rides the consumer's own registered tray icon channel; Linux typed
-   unsupported.
+   bridge gated on the consumer's registered tray icon and presenting through WinRT
+   toasts under a per-app AUMID; Linux typed unsupported.
 3. Keep the frozen payload bounds explicit: 64/256/64 UTF-16 units platform-independent,
    never truncated, with the win32 subtitle join jointly validated.
 4. State the embedded packaging meaning for consumers: a normal install is complete.
@@ -110,8 +111,9 @@ interface NotificationBackendCapabilities {
 
 ## Payload Bounds (frozen, platform-independent)
 
-The limits are one common contract on both platforms — taken from the win32 balloon
-buffer's physical capacity so the same strings work everywhere. All counts are UTF-16
+The limits are one common contract on both platforms — frozen from the historical
+win32 balloon buffer capacities (`NOTIFYICONDATAW`'s `szInfoTitle`/`szInfo` limits)
+and kept unchanged for the WinRT toast channel. All counts are UTF-16
 code units (`String.length`), all checks run in the facade before any dispatch, and
 **nothing is ever silently truncated**.
 
@@ -122,7 +124,7 @@ code units (`String.length`), all checks run in the facade before any dispatch, 
 | `subtitle` | 64 | `notification_payload_invalid`, details `{ field: "subtitle", lengthUtf16, limit }` |
 | `silent` | must be boolean when present | `notification_payload_invalid`, details `{ field: "silent" }` |
 
-**win32 subtitle degradation:** win32 balloon titles have no subtitle field, so the
+**win32 subtitle degradation:** win32 toast titles have no subtitle field, so the
 facade joins the subtitle into the body as `subtitle + "—" + body` (one em dash, no
 spaces; a subtitle without a body is the subtitle alone — no dangling separator). The
 **joined** string must satisfy the 256-unit limit; an overflow rejects typed
@@ -173,18 +175,30 @@ rendering across platforms.
 - There is **no authorization concept**: `getAuthorizationStatus()` resolves
   `"granted"` and `requestAuthorization()` resolves `true`, immediately — a documented
   always-granted degradation.
-- `notify` rides **your own registered tray icon's** balloon/toast channel
-  (`Shell_NotifyIcon(NIM_MODIFY, NIF_INFO)` on the same `(HWND, uID)` registration the
-  tray already owns). No new window, no new identity atom, no AUMID/shortcut setup —
-  and this is why the tray must be registered: `notify` on a scope with no live
+- `notify` is still **gated on your own registered tray icon**: the bridge resolves
+  the scope's live `(HWND, uID)` registration first, and a scope with no live
   registered icon rejects typed `notification_tray_absent`. With a normal
-  `createTray(...)` the icon always exists.
-- Balloons render as toasts on Windows 10+ and classic balloons earlier; there are no
-  action buttons, and duration is system policy.
-- **One balloon slot per icon:** multiple notification mounts (or rapid successive
-  `notify` calls) share the channel — the later notification replaces the earlier one.
-  Treat win32 notifications as latest-state, not a queue.
-- `silent: true` projects `NIIF_NOSOUND`; the default plays the platform default sound.
+  `createTray(...)` the icon always exists. Presentation (since 0.33.3) is a WinRT
+  `ToastNotification` posted under a per-app AUMID derived from your `appId` —
+  the legacy balloon channel (`Shell_NotifyIcon(NIM_MODIFY, NIF_INFO)`) was
+  unreliable on current Windows 11 builds (silently dropped balloons, including
+  after the tray overflow flyout is opened) and is retired.
+- The AUMID is an attribution record only: `HKCU\Software\Classes\AppUserModelId\<aumid>`
+  with a `DisplayName` value written once per process per app (failures are logged
+  broker-side and non-fatal). No new window and no second tray icon channel — the
+  record exists so the toast carries your app's name and is findable in
+  notification settings.
+- Each `notify` posts its own native toast (title-only template when `body` is
+  absent, title+body otherwise); there are no action buttons, and stacking,
+  retention, and duration are system policy. The balloon-era single-slot
+  replacement law (later notification replaces the earlier) no longer applies.
+- `notify` resolves on acceptance: the bridge hands the toast to a dedicated
+  worker thread and resolves immediately — whether and when the user sees the
+  banner is presentation policy. A closed toast worker surfaces the typed
+  `notification_failed`; presentation failures after acceptance are logged
+  broker-side and never retract the resolved call.
+- `silent: true` projects `<audio silent="true"/>` in the toast XML; the default
+  plays the platform default sound.
 
 ### Linux
 
@@ -201,7 +215,7 @@ Every typed rejection is a `NotificationError` with a stable `code` and structur
 | `notification_denied` | darwin: authorization is denied; zero delivery calls were made. | `{ status }` |
 | `notification_payload_invalid` | Options shape/bounds failure (unknown field, bad type, empty title, over-limit, joined-body overflow on win32). | `{ field, lengthUtf16?, limit? }` |
 | `notification_tray_absent` | win32 bridge: the command scope has no live registered tray icon channel. | bridge scope payload |
-| `notification_failed` | Native failure or the 10 s authorization timeout. | `{ reason }` (e.g. `"authorization-timeout"`) or an OS error code |
+| `notification_failed` | Native failure or the 10 s authorization timeout. | `{ reason }` (e.g. `"authorization-timeout"`) or the failing OS error code — win32 toasts carry `{ hresult }` |
 
 The shared transport-close code surfaces unchanged; the frozen notification family
 defines no transport alias.

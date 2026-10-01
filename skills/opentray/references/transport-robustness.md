@@ -21,6 +21,12 @@ observable:
   declarative state (tray options, last-set menu/icon/tooltip, app name and
   icon, loaded extensions, WebView windows with their last-set styles and
   event subscriptions) → a full state snapshot re-emit → resume.
+- **Recovery holds your process open.** While a supervised runtime is alive
+  (healthy or recovering) it keeps the host event loop referenced, so a
+  minimal consumer whose only loop holder is the broker connection does not
+  exit cleanly mid-recovery. The hold is released at terminal `abandoned`,
+  on caller-initiated teardown, and on terminal death with recovery
+  disabled — an explicitly dead runtime never zombies the host process.
 - **A bounded budget.** Recovery attempts are capped per sliding window.
   When the budget is exhausted the runtime stops retrying (no loop), every
   later call fails fast with a typed `TransportAbandonedError`, and your
@@ -37,13 +43,19 @@ dead runtime with typed errors" — never a silent wedge.
 | --- | --- | --- |
 | Interactive calls | 5 s | Menu/icon/tooltip/state queries and extension commands |
 | Teardown calls | 2 s | `destroy()` round-trips and connection close |
-| Bootstrap calls | 10 s | Connection handshake and first bring-up |
+| Bootstrap calls | 10 s | Connection handshake, first bring-up, and a WebView window's first `show()` (cold native creation is bootstrap-class) |
 | Heartbeat probe cadence | 30 s idle / 3 s probe deadline / 3 consecutive failures | A busy transport proves its own liveness; probes only run on silence |
 | Recovery attempts | 3 per 10 min window | In-memory per runtime; a fresh process start resets it |
 | Recovery cooldown | 1 s, doubling per failed attempt, capped at 30 s | |
+| Reconnect attempt | 10 s | `recovery.connectTimeoutMs`; a connect that never settles counts as a failed attempt and its late-resolving connection is closed on arrival |
 
 Every value is overridable through the optional `recovery` runtime option —
 and omitting the object entirely is the recommended, fully-protected default.
+Per-call budgets can be widened individually where a call legitimately needs
+more than the interactive class: the extension request surface
+(`TrayExtensionContext.request/command`, and the tray handle's
+`requestExtension`/`commandExtension`) accepts an optional call-options
+parameter with `deadlineMs`.
 
 ## The rejection taxonomy
 
