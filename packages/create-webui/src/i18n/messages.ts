@@ -288,6 +288,14 @@ export interface Messages {
     readonly linked: string;
     readonly uninstallRetained: string;
     readonly uninstallDeleted: string;
+    /** add-create-kernel-upgrade：批量内核升级的选择与结果文案。 */
+    readonly selectAll: string;
+    readonly selectApp: string;
+    readonly upgradeAction: string;
+    readonly upgradeRunning: string;
+    readonly upgradeDone: string;
+    readonly upgradeUpToDate: string;
+    readonly upgradeFailed: string;
   };
   readonly help: {
     readonly title: string;

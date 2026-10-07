@@ -285,6 +285,13 @@ export const zhCN: Messages = {
     linked: "链接",
     uninstallRetained: "外部目录已保留：",
     uninstallDeleted: "外部目录已删除：",
+    selectAll: "全选",
+    selectApp: "选择应用",
+    upgradeAction: "升级内核（{count}）",
+    upgradeRunning: "升级中…",
+    upgradeDone: "{app}：内核已升级",
+    upgradeUpToDate: "{app}：已是最新内核",
+    upgradeFailed: "{app}：内核升级失败",
   },
   help: {
     title: "帮助中心",

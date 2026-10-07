@@ -552,3 +552,50 @@ describe("create --toolbar command applications", () => {
     expect(edited.window.toolbar).toBe(false);
   });
 });
+
+// add-create-kernel-upgrade：CLI 适配层的参数/寻址/空表语义；升级主路径
+// （install、版本真相、观察）由 core kernel-upgrade.test 的 seams 覆盖，
+// 真实网络 install 由实机验收（tasks 5.2）承担。
+describe("app upgrade (add-create-kernel-upgrade)", () => {
+  it("requires an app id or --all", async () => {
+    const code = await run(["app", "upgrade"]);
+    expect(code).not.toBe(0);
+    expect(errLines.join("\n")).toContain("app ids");
+  });
+
+  it("rejects an unknown app id before any install runs", async () => {
+    const code = await run(["app", "upgrade", "no-such.example"]);
+    expect(code).not.toBe(0);
+  });
+
+  it("--all over an empty registry reports no registered applications", async () => {
+    const emptyHome = await mkdtemp(join(tmpdir(), "cli-upgrade-empty-"));
+    try {
+      const code = await dispatchCli(["app", "upgrade", "--all"], {
+        streams,
+        homeDir: emptyHome,
+        skipInstall: true,
+      });
+      expect(code).toBe(0);
+      expect(outLines.join("\n")).toContain("no registered applications");
+    } finally {
+      await rm(emptyHome, { recursive: true, force: true });
+    }
+  });
+
+  it("fan-out failure prints per-project FAILED lines with the install tail", async () => {
+    // One managed app whose payload dependencies are emptied first: the core
+    // path fails fast (no package-manager run, no network).
+    await run(["create", "--app-id", "nokernel.example", "--app-name", "NoKernel", "--exec", "node"]);
+    const payloadDir = join(home, ".opentray", "create", "nokernel-example", "app");
+    const manifestPath = join(payloadDir, "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.dependencies = {};
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+    const code = await run(["app", "upgrade", "nokernel.example"]);
+    expect(code).not.toBe(0);
+    const text = [...outLines, ...errLines].join("\n");
+    expect(text).toContain("FAILED");
+    expect(text).toContain("no kernel packages");
+  });
+});

@@ -302,6 +302,13 @@ export const es: Messages = {
     linked: "Enlazado",
     uninstallRetained: "Destino externo conservado:",
     uninstallDeleted: "Destino externo eliminado:",
+    selectAll: "Seleccionar todo",
+    selectApp: "Seleccionar aplicación",
+    upgradeAction: "Actualizar kernel ({count})",
+    upgradeRunning: "Actualizando…",
+    upgradeDone: "{app}: kernel actualizado",
+    upgradeUpToDate: "{app}: ya está actualizado",
+    upgradeFailed: "{app}: fallo al actualizar el kernel",
   },
   help: {
     title: "Centro de ayuda",

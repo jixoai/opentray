@@ -21,6 +21,7 @@ import {
   stopRunningApp,
   uninstallApp,
   uninstallWizardProject,
+  upgradeAppKernel,
   type CreateConfigV1,
   type EmbeddedResource,
 } from "@create-opentray/core";
@@ -239,6 +240,28 @@ export const handleWorkbenchApi = async (
     // instead of a silent no-window (2026-10-07 first-open deadlock).
     const opened = await openMaterializedApp({ projectDir, bundlePath: undefined, observeMs: 4000 });
     return { status: opened.ok ? 200 : 500, body: opened };
+  }
+
+  const upgradeMatch = /^\/api\/apps\/([^/]+)\/upgrade$/.exec(pathname);
+  if (upgradeMatch !== null && request.method === "POST") {
+    // Kernel upgrade (add-create-kernel-upgrade D4): the webui is a thin
+    // adapter over the core procedure; batch behavior lives client-side as
+    // sequential per-app calls so each project's outcome renders itself.
+    const key = decodeURIComponent(upgradeMatch[1]!);
+    const entry = await findCreateEntry(key);
+    if (entry === undefined) {
+      return { status: 404, body: { code: "not_found", message: `no application at key ${key}` } };
+    }
+    const projectDir = entry.source === "wizard" ? entry.dir : entry.record.payloadPath;
+    if (projectDir === undefined) {
+      return { status: 409, body: { code: "missing_payload", message: "application payload is unavailable" } };
+    }
+    const target = typeof request.body.target === "string" && request.body.target.length > 0
+      ? request.body.target
+      : "latest";
+    const restart = request.body.restart === true;
+    const upgraded = await upgradeAppKernel(projectDir, { target, restart, observeMs: 4000 });
+    return { status: upgraded.ok ? 200 : 500, body: upgraded };
   }
 
   const uninstallMatch = /^\/api\/apps\/([^/]+)\/uninstall$/.exec(pathname);

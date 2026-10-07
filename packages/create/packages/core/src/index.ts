@@ -119,6 +119,14 @@ export {
   type StopLiveInstancesResult,
 } from "./open-app";
 export {
+  KERNEL_PACKAGES,
+  upgradeAppKernel,
+  type KernelUpgradeOptions,
+  type KernelUpgradeResult,
+  type RunKernelInstallInput,
+  type RunKernelInstallResult,
+} from "./kernel-upgrade";
+export {
   isUiLocale,
   ptyUnavailableMessage,
   resolveUiLocale,

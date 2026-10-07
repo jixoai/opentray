@@ -303,6 +303,13 @@ export const ru: Messages = {
     linked: "Связано",
     uninstallRetained: "Внешняя цель сохранена:",
     uninstallDeleted: "Внешняя цель удалена:",
+    selectAll: "Выбрать все",
+    selectApp: "Выбрать приложение",
+    upgradeAction: "Обновить ядро ({count})",
+    upgradeRunning: "Обновление…",
+    upgradeDone: "{app}: ядро обновлено",
+    upgradeUpToDate: "{app}: уже актуально",
+    upgradeFailed: "{app}: не удалось обновить ядро",
   },
   help: {
     title: "Центр справки",

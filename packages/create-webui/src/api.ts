@@ -163,6 +163,34 @@ export const openApp = (
     { method: "POST", body: {} },
   );
 
+/** Kernel upgrade outcome (add-create-kernel-upgrade): mirrors core's shape. */
+export interface KernelUpgradeResponse {
+  readonly ok: boolean;
+  readonly projectDir: string;
+  readonly packageManager: string;
+  readonly target: string;
+  readonly from: Readonly<Record<string, string>>;
+  readonly to: Readonly<Record<string, string>>;
+  readonly upgraded: readonly string[];
+  readonly alreadyUpToDate: boolean;
+  readonly stoppedPids: readonly number[];
+  readonly installTail: string | undefined;
+  readonly error: string | undefined;
+}
+
+/**
+ * Upgrade one listed application's OpenTray kernel (opentray +
+ * @opentray/ext-webview) through its own package manager. Batch behavior is
+ * the caller's sequential loop — every project's outcome renders itself.
+ */
+export const upgradeApp = (
+  key: string,
+): Promise<{ readonly status: number; readonly data: KernelUpgradeResponse | { readonly code: string; readonly message: string } }> =>
+  request<KernelUpgradeResponse | { code: string; message: string }>(
+    `/api/apps/${encodeURIComponent(key)}/upgrade`,
+    { method: "POST", body: {} },
+  );
+
 /**
  * Share the wizard's FROZEN parameters (pre-create): self-contained script
  * built without running anything. The result maps onto the export dialog's

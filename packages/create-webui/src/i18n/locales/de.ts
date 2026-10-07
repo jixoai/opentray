@@ -303,6 +303,13 @@ export const de: Messages = {
     linked: "Verknüpft",
     uninstallRetained: "Externes Ziel beibehalten:",
     uninstallDeleted: "Externes Ziel gelöscht:",
+    selectAll: "Alle auswählen",
+    selectApp: "App auswählen",
+    upgradeAction: "Kernel upgraden ({count})",
+    upgradeRunning: "Upgrade läuft…",
+    upgradeDone: "{app}: Kernel aktualisiert",
+    upgradeUpToDate: "{app}: bereits aktuell",
+    upgradeFailed: "{app}: Kernel-Upgrade FEHLGESCHLAGEN",
   },
   help: {
     title: "Hilfe-Center",

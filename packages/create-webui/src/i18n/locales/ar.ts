@@ -302,6 +302,13 @@ export const ar: Messages = {
     linked: "مرتبط",
     uninstallRetained: "احتُفظ بالهدف الخارجي:",
     uninstallDeleted: "حُذف الهدف الخارجي:",
+    selectAll: "تحديد الكل",
+    selectApp: "تحديد التطبيق",
+    upgradeAction: "ترقية النواة ({count})",
+    upgradeRunning: "جارٍ الترقية…",
+    upgradeDone: "{app}: تمت ترقية النواة",
+    upgradeUpToDate: "{app}: النواة محدثة بالفعل",
+    upgradeFailed: "{app}: فشلت ترقية النواة",
   },
   help: {
     title: "مركز المساعدة",

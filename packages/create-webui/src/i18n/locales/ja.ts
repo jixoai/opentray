@@ -303,6 +303,13 @@ export const ja: Messages = {
     linked: "リンク",
     uninstallRetained: "外部ディレクトリは保持されました：",
     uninstallDeleted: "外部ディレクトリは削除されました：",
+    selectAll: "すべて選択",
+    selectApp: "アプリを選択",
+    upgradeAction: "カーネルをアップグレード（{count}）",
+    upgradeRunning: "アップグレード中…",
+    upgradeDone: "{app}：カーネルを更新しました",
+    upgradeUpToDate: "{app}：すでに最新です",
+    upgradeFailed: "{app}：カーネルの更新に失敗しました",
   },
   help: {
     title: "ヘルプセンター",

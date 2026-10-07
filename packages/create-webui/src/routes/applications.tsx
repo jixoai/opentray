@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  ArrowUpCircleIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   ExternalLinkIcon,
@@ -25,6 +26,7 @@ import {
   fetchApps,
   openApp,
   uninstallApp,
+  upgradeApp,
   type AppRecord,
   type UninstallError,
 } from "../api";
@@ -45,6 +47,7 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import { usePreferences } from "../preferences";
+import { fmt } from "../i18n";
 import { useWorkbenchNavigation } from "../workbench-shell";
 
 const STATUS_LABEL_KEYS: Record<AppRecord["status"], keyof ReturnType<typeof statusLabels>> = {
@@ -206,6 +209,66 @@ export const ApplicationsRoute = (): React.JSX.Element => {
     );
   };
 
+  // add-create-kernel-upgrade D4：选择集合 + 顺序批量升级。批量 = 逐项串行
+  // （每项结果独立呈现）；安装互不并发（包管理器缓存与共享 runtime staging
+  // 下并行是负债）。失败不中断后续项目。
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [upgrading, setUpgrading] = useState(false);
+
+  const allSelected = apps.length > 0 && apps.every((app) => selected.has(app.key));
+
+  const toggleSelected = (key: string): void => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (): void => {
+    setSelected(allSelected ? new Set() : new Set(apps.map((app) => app.key)));
+  };
+
+  const upgradeSelected = async (): Promise<void> => {
+    const targets = apps.filter((app) => selected.has(app.key));
+    if (targets.length === 0 || upgrading) return;
+    setUpgrading(true);
+    const lines: string[] = [];
+    try {
+      for (const app of targets) {
+        const response = await upgradeApp(app.key);
+        const data = response.data;
+        if (response.status === 200 && "ok" in data && data.ok === true) {
+          const moved = data.upgraded
+            .map((name) => `${name}: ${data.from[name] ?? "?"} → ${data.to[name] ?? "?"}`)
+            .join(", ");
+          lines.push(
+            data.alreadyUpToDate
+              ? fmt(messages.applications.upgradeUpToDate, { app: app.appName ?? app.key })
+              : `${fmt(messages.applications.upgradeDone, { app: app.appName ?? app.key })} (${moved})`,
+          );
+        } else {
+          lines.push(
+            `${fmt(messages.applications.upgradeFailed, { app: app.appName ?? app.key })}\n${
+              "error" in data && data.error !== undefined
+                ? data.error
+                : "installTail" in data && data.installTail !== undefined
+                  ? data.installTail
+                  : messages.common.error
+            }`,
+          );
+        }
+      }
+    } finally {
+      setUpgrading(false);
+    }
+    setResult(lines.join("\n"));
+  };
+
   const reportUninstall = (data: {
     registrationPath?: string;
     projectPath?: string;
@@ -297,6 +360,33 @@ export const ApplicationsRoute = (): React.JSX.Element => {
         )}
 
         {apps.length > 0 && (
+          <div className="mb-3 flex items-center gap-2">
+            {/* add-create-kernel-upgrade：选择列（单选/全选）+ 批量内核升级。 */}
+            <label className="flex items-center gap-1.5 text-xs">
+              <Checkbox
+                checked={allSelected}
+                onCheckedChange={() => toggleSelectAll()}
+                aria-label={messages.applications.selectAll}
+                disabled={upgrading}
+              />
+              <span className="text-muted-foreground">{messages.applications.selectAll}</span>
+            </label>
+            <div className="flex-1" />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={selected.size === 0 || upgrading}
+              onClick={() => void upgradeSelected()}
+            >
+              <ArrowUpCircleIcon width={14} height={14} aria-hidden />
+              {upgrading
+                ? messages.applications.upgradeRunning
+                : fmt(messages.applications.upgradeAction, { count: String(selected.size) })}
+            </Button>
+          </div>
+        )}
+
+        {apps.length > 0 && (
           <ul className="space-y-2">
             {apps.map((app) => {
               const expanded = expandedKey === app.key;
@@ -308,6 +398,12 @@ export const ApplicationsRoute = (): React.JSX.Element => {
                   className="border-border bg-card text-card-foreground rounded-lg border px-3 py-2"
                 >
                   <div className="flex items-center gap-3">
+                    <Checkbox
+                      checked={selected.has(app.key)}
+                      onCheckedChange={() => toggleSelected(app.key)}
+                      aria-label={messages.applications.selectApp}
+                      disabled={upgrading}
+                    />
                     <AppIconTile app={app} dataUrl={icons[app.key]} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">

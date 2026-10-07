@@ -302,6 +302,13 @@ export const fr: Messages = {
     linked: "Lié",
     uninstallRetained: "Cible externe conservée :",
     uninstallDeleted: "Cible externe supprimée :",
+    selectAll: "Tout sélectionner",
+    selectApp: "Sélectionner l'app",
+    upgradeAction: "Mettre à jour le noyau ({count})",
+    upgradeRunning: "Mise à jour…",
+    upgradeDone: "{app} : noyau mis à jour",
+    upgradeUpToDate: "{app} : déjà à jour",
+    upgradeFailed: "{app} : échec de la mise à jour du noyau",
   },
   help: {
     title: "Centre d'aide",

@@ -29,9 +29,11 @@ import {
   registrationKey,
   stopRunningApp,
   uninstallApp,
+  upgradeAppKernel,
   type CreateConfigV1,
   type DesiredState,
   type IconBackgroundName,
+  type KernelUpgradeResult,
   type PackageManagerName,
   type ResourceInput,
   type Result,
@@ -669,6 +671,112 @@ const appUninstallCommand = (context: CliContext): CommandModule => ({
   },
 });
 
+// ---------------------------------------------------------------------------
+// app upgrade (add-create-kernel-upgrade)
+// ---------------------------------------------------------------------------
+
+const appUpgradeCommand = (context: CliContext): CommandModule => ({
+  command: "upgrade [app-id..]",
+  describe: "advance a project's OpenTray kernel (opentray + @opentray/ext-webview) through its own package manager",
+  builder: (yargs: Argv) =>
+    yargs
+      .positional("app-id", { type: "string", array: true })
+      .option("all", { type: "boolean", default: false, describe: "upgrade every registered application sequentially" })
+      .option("target", { type: "string", default: "latest", describe: "dependency spec for both kernel packages (default: latest)" })
+      .option("restart", { type: "boolean", default: false, describe: "reopen each app through the observed open path after upgrading" })
+      .option("json", { type: "boolean", default: false }),
+  handler: async (argv) => {
+    const json = (argv.json as boolean) === true;
+    const target = argv.target as string;
+    const restart = (argv.restart as boolean) === true;
+    const explicit = (argv["app-id"] as string[] | undefined) ?? [];
+    if ((argv.all as boolean) !== true && explicit.length === 0) {
+      finish(context, { ok: false, error: { code: "app_id_required", message: "pass one or more app ids, or --all" } }, json);
+      return;
+    }
+    // Sequential fan-out (plan D4): package-manager caches and the shared
+    // runtime staging make parallel installs a liability, not a win.
+    const targets: { key: string; projectDir: string | undefined }[] = [];
+    if ((argv.all as boolean) === true) {
+      for (const record of await listRegistrations(context.homeDir)) {
+        targets.push({ key: record.key, projectDir: record.payloadPath });
+      }
+    } else {
+      for (const appId of explicit) {
+        const existing = await loadRegistration(registrationKey(appId), context.homeDir);
+        if (!existing.ok) {
+          finish(context, { ok: false, error: existing.error }, json);
+          return;
+        }
+        targets.push({ key: existing.value.key, projectDir: existing.value.payloadPath });
+      }
+    }
+    if (targets.length === 0) {
+      finish(context, { ok: true, result: [] }, json, () => "no registered applications");
+      return;
+    }
+    const results: KernelUpgradeResult[] = [];
+    let sawFailure = false;
+    for (const item of targets) {
+      if (item.projectDir === undefined) {
+        results.push({
+          ok: false,
+          projectDir: "",
+          packageManager: "npm",
+          target,
+          from: {},
+          to: {},
+          upgraded: [],
+          alreadyUpToDate: false,
+          stoppedPids: [],
+          installTail: undefined,
+          restart: undefined,
+          error: `application payload is unavailable for ${item.key}`,
+        });
+        sawFailure = true;
+        continue;
+      }
+      const result = await upgradeAppKernel(item.projectDir, { target, restart });
+      results.push(result);
+      if (!result.ok) {
+        sawFailure = true;
+      }
+    }
+    const blocks = results
+      .map((row) => {
+        const head = row.ok
+          ? row.alreadyUpToDate
+            ? `up-to-date  ${row.projectDir}`
+            : `upgraded    ${row.projectDir} (${row.upgraded.map((name) => `${name}: ${row.from[name] ?? "?"} -> ${row.to[name] ?? "?"}`).join(", ")})`
+          : `FAILED      ${row.projectDir}: ${row.error ?? "unknown error"}`;
+        const stopped = row.stoppedPids.length > 0 ? `\n  stopped live instances: ${row.stoppedPids.join(", ")}` : "";
+        const tailText = row.installTail !== undefined ? `\n  install output tail:\n${row.installTail}` : "";
+        const restarted = row.restart !== undefined ? `\n  restart: ${row.restart.ok ? "ok" : "FAILED"} — ${row.restart.detail}` : "";
+        return `${head}${stopped}${tailText}${restarted}`;
+      })
+      .join("\n");
+    // Per-project detail is the payload the operator asked for: it prints on
+    // BOTH outcomes (JSON carries `results`; human prints the blocks first,
+    // then the summary error line) — a batch failure never hides its rows.
+    if (json) {
+      context.streams.out(JSON.stringify({
+        ok: !sawFailure,
+        ...(sawFailure ? { error: { code: "kernel_upgrade_failed", message: "one or more upgrades failed" } } : {}),
+        results,
+      }));
+      exitSetter(context)(sawFailure ? 1 : 0);
+      return;
+    }
+    if (blocks.length > 0) {
+      context.streams.out(blocks);
+    }
+    if (sawFailure) {
+      context.streams.err("error [kernel_upgrade_failed]: one or more upgrades failed");
+    }
+    exitSetter(context)(sawFailure ? 1 : 0);
+  },
+});
+
 const appCommand = (context: CliContext): CommandModule => ({
   command: "app",
   describe: "manage registered applications",
@@ -679,7 +787,8 @@ const appCommand = (context: CliContext): CommandModule => ({
       .command(appCopyCommand(context))
       .command(appExportCommand(context))
       .command(appUninstallCommand(context))
-      .demandCommand(1, "app requires a subcommand: list | edit | copy | export | uninstall"),
+      .command(appUpgradeCommand(context))
+      .demandCommand(1, "app requires a subcommand: list | edit | copy | export | uninstall | upgrade"),
   handler: () => undefined,
 });
 

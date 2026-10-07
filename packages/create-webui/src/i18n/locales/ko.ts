@@ -303,6 +303,13 @@ export const ko: Messages = {
     linked: "연결됨",
     uninstallRetained: "외부 대상이 유지되었습니다:",
     uninstallDeleted: "외부 대상이 삭제되었습니다:",
+    selectAll: "모두 선택",
+    selectApp: "앱 선택",
+    upgradeAction: "커널 업그레이드({count})",
+    upgradeRunning: "업그레이드 중…",
+    upgradeDone: "{app}: 커널 업그레이드 완료",
+    upgradeUpToDate: "{app}: 이미 최신입니다",
+    upgradeFailed: "{app}: 커널 업그레이드 실패",
   },
   help: {
     title: "도움말 센터",
