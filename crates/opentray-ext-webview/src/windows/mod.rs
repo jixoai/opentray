@@ -2564,17 +2564,24 @@ fn build_webview(
 
 /// Disables WebView2's browser accelerator keys (Ctrl+Plus/Minus/Zero zoom,
 /// Ctrl+F/R/P family). Only reachable for an explicit `zoomShortcuts: false`.
+/// The property lives on the versioned `ICoreWebView2Settings3` interface —
+/// `AreBrowserAcceleratorKeysEnabled` joined after the base settings iface.
 fn disable_browser_accelerator_keys(webview: &WebView) -> Result<(), WebviewRuntimeError> {
     let core = webview.webview();
     let settings = unsafe { core.Settings() }.map_err(|error| {
         WebviewRuntimeError::Internal(format!("WebView2 settings unavailable: {error}"))
     })?;
-    unsafe { settings.SetAreBrowserAcceleratorKeysEnabled(windows::core::BOOL::from(false)) }
-        .map_err(|error| {
+    let settings3: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3 =
+        windows::core::Interface::cast(&settings).map_err(|error| {
             WebviewRuntimeError::Internal(format!(
-                "disabling WebView2 accelerator keys failed: {error}"
+                "ICoreWebView2Settings3 unavailable (WebView2 runtime too old): {error}"
             ))
         })?;
+    unsafe { settings3.SetAreBrowserAcceleratorKeysEnabled(false) }.map_err(|error| {
+        WebviewRuntimeError::Internal(format!(
+            "disabling WebView2 accelerator keys failed: {error}"
+        ))
+    })?;
     Ok(())
 }
 
