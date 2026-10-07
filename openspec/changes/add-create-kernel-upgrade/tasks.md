@@ -32,7 +32,7 @@
 ## 5. Verification
 
 - [x] 5.1 Focused suites green (core / create / create-webui + typecheck).
-- [ ] 5.2 Real-machine acceptance: CLI upgrades the local `remote-ai-z-zcode` project to
+- [x] 5.2 Real-machine acceptance: CLI upgrades the local `remote-ai-z-zcode` project to
       the newly published version; `node_modules` versions advanced; app reopens.
-- [ ] 5.3 Vision walkthrough of the webui applications upgrade surface.
-- [ ] 5.4 Changesets + release.
+- [x] 5.3 Vision walkthrough of the webui applications upgrade surface.
+- [x] 5.4 Changesets + release.
