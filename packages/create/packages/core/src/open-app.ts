@@ -6,9 +6,17 @@
 // 2026-09-14 walkthrough P0: an open now REPLACES a live instance of the same
 // app instead of racing it into OPENTRAY_BROKER_SINGLE_SESSION — a Dock-pinned
 // carrier cold-starts the entry after the original instance exited, and that
-// resurrected instance owns the broker session and a stale shell server):
+// resurrected instance owns the broker session and a stale shell server;
+// 2026-10-07 first-open deadlock: a first open whose entry dies before the
+// broker handshake leaves a materialized bundle WITHOUT its launch descriptor
+// (the descriptor is committed only after a successful handshake), and every
+// later open then cold-starts the carrier into a permanent descriptor-missing
+// flash-quit — bundle presence alone is no longer launch-vector authority, and
+// webui-facing callers get a bounded first-start observation that surfaces the
+// entry's startup failure from app.log):
 // 1. Open the materialized app per platform: macOS via the stable .app bundle
-//    when it exists, else a detached cold start of the generated entry.
+//    ONLY when the bundle also carries its launch descriptor, else a detached
+//    cold start of the generated entry (which writes the descriptor).
 // 2. Launch the entry with a real Node runtime (a Bun-hosted wizard must not
 //    persist its own execPath into the spawned app).
 // 3. Keep the hint platform-truthful: no Windows shortcut persistence claims
@@ -16,6 +24,9 @@
 // 4. Replace any live entry instance first (Dev Launch Law replace semantics):
 //    probe by argv identity (`<projectDir>/main.mjs`), stop the tree, and wait
 //    bounded for PID release before spawning the new instance.
+// 5. Optionally observe the first start for a bounded budget: the entry writes
+//    an entryStart milestone before the handshake, so an early death is
+//    attributable from app.log instead of vanishing behind `stdio: "ignore"`.
 
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { stat } from "node:fs/promises";
@@ -37,6 +48,13 @@ export interface OpenAppInput {
   readonly probe?: OpenAppProbeSeams | undefined;
   /** Budget for the replace-path pid-death wait (default 5000ms). */
   readonly stopWaitBudgetMs?: number | undefined;
+  /**
+   * Bounded first-start observation budget for webui-facing callers (0/undefined
+   * disables it — the CLI keeps the fire-and-forget semantics). The entry's
+   * early death or startup failure is reported through `observed` and the
+   * detail; a still-alive entry reports "running" honestly.
+   */
+  readonly observeMs?: number | undefined;
 }
 
 /** Test seams over the live-instance probe (the real default shells out). */
@@ -45,9 +63,21 @@ export interface OpenAppProbeSeams {
   readonly killTree?: (pid: number) => Promise<unknown>;
 }
 
+/** How the spawned/observed entry settled within the observation budget. */
+export type EntryStartupOutcome = "running" | "exited" | "failed" | "not-found";
+
+export interface EntryStartupObservation {
+  readonly outcome: EntryStartupOutcome;
+  readonly pid: number | undefined;
+  /** Tail of the entry's app.log (the entry's own durable failure surface). */
+  readonly logTail: string | undefined;
+}
+
 export interface OpenAppResult {
   readonly ok: boolean;
   readonly detail: string;
+  /** Present only when observeMs > 0: the bounded first-start observation. */
+  readonly observed?: EntryStartupOutcome;
 }
 
 /** The generated entry embeds a native PTY: it needs Node, never a Bun host. */
@@ -80,7 +110,9 @@ const expectedBundleForProject = async (projectDir: string): Promise<string | un
   }
 };
 
-const spawnEntryCold = (projectDir: string): OpenAppResult => {
+const spawnEntryCold = (
+  projectDir: string,
+): { result: OpenAppResult; pid: number | undefined } => {
   const child = spawn(nodeExecutable(), [join(projectDir, "main.mjs")], {
     cwd: projectDir,
     stdio: "ignore",
@@ -91,9 +123,15 @@ const spawnEntryCold = (projectDir: string): OpenAppResult => {
   child.once("error", () => {});
   child.unref();
   if (child.pid === undefined) {
-    return { ok: false, detail: `failed to spawn ${projectDir}/main.mjs` };
+    return {
+      result: { ok: false, detail: `failed to spawn ${projectDir}/main.mjs` },
+      pid: undefined,
+    };
   }
-  return { ok: true, detail: `launched app entry (pid ${child.pid})` };
+  return {
+    result: { ok: true, detail: `launched app entry (pid ${child.pid})` },
+    pid: child.pid,
+  };
 };
 
 const isPidAlive = (pid: number): boolean => {
@@ -167,6 +205,124 @@ const waitForExit = async (pids: readonly number[], budgetMs: number): Promise<b
   }
 };
 
+/** App.log tail cap: enough for the failed milestone plus a full stack. */
+const LOG_TAIL_BYTES = 4096;
+/** startup-failure marker written by the generated entry's top-level catch. */
+const STARTUP_FAILED_MARKER = "[create-opentray] startup failed:";
+const OBSERVE_POLL_MS = 150;
+/**
+ * Grace for the LaunchServices path: the carrier must read its descriptor and
+ * spawn the entry before argv-identity probing can see the instance.
+ */
+const CARRIER_SPAWN_GRACE_MS = 600;
+
+const appLogTail = async (projectDir: string): Promise<string | undefined> => {
+  try {
+    const raw = await readFile(join(projectDir, "app.log"), "utf8");
+    return raw.length > LOG_TAIL_BYTES ? raw.slice(-LOG_TAIL_BYTES) : raw;
+  } catch {
+    return undefined;
+  }
+};
+
+export interface ObserveEntryStartupOptions {
+  readonly projectDir: string;
+  /** The spawned pid when the caller owns it; probed by argv identity otherwise. */
+  readonly pid?: number | undefined;
+  readonly budgetMs: number;
+  readonly platform?: NodeJS.Platform | undefined;
+}
+
+/**
+ * Bounded first-start observation (first-open deadlock, 2026-10-07): the
+ * detached entry runs with `stdio: "ignore"`, so its only durable surfaces are
+ * the entryStart milestone it writes before the broker handshake and the
+ * startup-failure stack its top-level catch persists. This observer turns an
+ * early death into an attributable answer instead of a silent no-window:
+ * - "failed": app.log carries the startup-failure marker (entry still exiting).
+ * - "exited": the entry pid is gone — logTail carries the last milestones,
+ *   or explains that the entry died before its first milestone.
+ * - "running": the entry is alive when the budget ends (honest non-claim: the
+ *   handshake may still be in flight; broker readiness is NOT observed here).
+ * - "not-found": nothing to observe (probe found no entry instance).
+ */
+export const observeEntryStartup = async (
+  options: ObserveEntryStartupOptions,
+): Promise<EntryStartupObservation> => {
+  const platform = options.platform ?? process.platform;
+  const deadline = Date.now() + options.budgetMs;
+  let pid = options.pid;
+  if (pid === undefined) {
+    const probed = await defaultFindEntryPids(options.projectDir, platform);
+    pid = probed.find(isPidAlive);
+    if (pid === undefined) {
+      return { outcome: "not-found", pid: undefined, logTail: undefined };
+    }
+  }
+  for (;;) {
+    const logTail = await appLogTail(options.projectDir);
+    if (logTail !== undefined && logTail.includes(STARTUP_FAILED_MARKER)) {
+      return { outcome: "failed", pid, logTail };
+    }
+    if (!isPidAlive(pid)) {
+      return { outcome: "exited", pid, logTail };
+    }
+    if (Date.now() >= deadline) {
+      return { outcome: "running", pid, logTail };
+    }
+    await new Promise((resolve) => {
+      setTimeout(resolve, OBSERVE_POLL_MS);
+    });
+  }
+};
+
+/** Fold an observation into the open result: surface failures, keep runs honest. */
+const withObservation = (
+  result: OpenAppResult,
+  observation: EntryStartupObservation,
+): OpenAppResult => {
+  switch (observation.outcome) {
+    case "running":
+      return {
+        ...result,
+        observed: observation.outcome,
+        detail: `${result.detail}; entry is running (pid ${observation.pid})`,
+      };
+    case "failed":
+      return {
+        ok: false,
+        observed: observation.outcome,
+        detail: `${result.detail}; the entry FAILED during startup — app.log tail:\n${observation.logTail ?? ""}`,
+      };
+    case "exited":
+      return {
+        ok: false,
+        observed: observation.outcome,
+        detail: `${result.detail}; the entry exited before finishing startup${observation.logTail === undefined ? " without writing app.log (it died before its first milestone)" : ` — app.log tail:\n${observation.logTail}`}`,
+      };
+    case "not-found":
+      return { ...result, observed: observation.outcome };
+  }
+};
+
+const observeIfRequested = async (
+  observeMs: number | undefined,
+  projectDir: string,
+  pid: number | undefined,
+  platform: NodeJS.Platform,
+): Promise<(result: OpenAppResult) => OpenAppResult> => {
+  if ((observeMs ?? 0) <= 0) {
+    return (result) => result;
+  }
+  const observation = await observeEntryStartup({
+    projectDir,
+    pid,
+    budgetMs: observeMs as number,
+    platform,
+  });
+  return (result) => withObservation(result, observation);
+};
+
 export interface StopLiveInstancesOptions {
   readonly platform?: NodeJS.Platform | undefined;
   readonly probe?: OpenAppProbeSeams | undefined;
@@ -212,6 +368,24 @@ export const stopLiveAppInstances = async (
   return { stoppedPids: pids, hung: false };
 };
 
+/**
+ * A bundle is carrier-openable only when its mutable cold-launch descriptor is
+ * present. The descriptor is committed after a successful broker handshake,
+ * but bundle materialization happens DURING that handshake — an entry that
+ * dies mid-handshake leaves a bundle whose every carrier open flash-quits on
+ * the missing descriptor. Treat "bundle without descriptor" as "never
+ * successfully started" and cold-start the entry again (it writes the
+ * descriptor), instead of routing every later open into the dead carrier path.
+ */
+const bundleHasLaunchDescriptor = async (bundlePath: string): Promise<boolean> => {
+  try {
+    await readFile(join(bundlePath, "Contents", "Resources", "opentray-launch.json"));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const openMaterializedApp = async (input: OpenAppInput): Promise<OpenAppResult> => {
   const platform = input.platform ?? process.platform;
   // Replace first (P0): never race a live instance of this app for its broker
@@ -224,19 +398,38 @@ export const openMaterializedApp = async (input: OpenAppInput): Promise<OpenAppR
   const replacedNote = replaced.stoppedPids.length === 0
     ? ""
     : `replaced live instance (pid ${replaced.stoppedPids.join(", ")})${replaced.hung ? " — WARNING: pid still alive after stop" : ""}; `;
+  const coldStart = async (): Promise<OpenAppResult> => {
+    const { result, pid } = spawnEntryCold(input.projectDir);
+    const fold = await observeIfRequested(input.observeMs, input.projectDir, pid, platform);
+    return withNote(fold(result), replacedNote);
+  };
   if (platform === "darwin") {
     const bundlePath =
       input.bundlePath ?? (await expectedBundleForProject(input.projectDir));
     if (bundlePath === undefined) {
       // No identity to derive a bundle from: cold-start through the entry.
-      return withNote(spawnEntryCold(input.projectDir), replacedNote);
+      return coldStart();
     }
     try {
       await stat(bundlePath);
     } catch {
       // Never launched → no materialized bundle yet: the entry's first run
       // creates it, after which Dock pinning becomes available.
-      return withNote(spawnEntryCold(input.projectDir), replacedNote);
+      return coldStart();
+    }
+    if (!(await bundleHasLaunchDescriptor(bundlePath))) {
+      // First open never completed (2026-10-07 deadlock): the carrier would
+      // flash-quit on the missing descriptor forever. Cold-start the entry so
+      // a successful handshake commits it; the NEXT open uses the carrier.
+      const { result, pid } = spawnEntryCold(input.projectDir);
+      const fold = await observeIfRequested(input.observeMs, input.projectDir, pid, platform);
+      return withNote(
+        fold({
+          ...result,
+          detail: `bundle has no launch descriptor (first open never completed); ${result.detail}`,
+        }),
+        replacedNote,
+      );
     }
     const child = spawn("open", [bundlePath], {
       stdio: "ignore",
@@ -247,14 +440,31 @@ export const openMaterializedApp = async (input: OpenAppInput): Promise<OpenAppR
       child.once("exit", (code) => resolve(code));
     });
     if (status === 0) {
-      return { ok: true, detail: `${replacedNote}opened ${bundlePath}` };
+      // The carrier cold-starts the entry asynchronously; give it a grace
+      // window before argv probing, then observe the entry it spawned.
+      if ((input.observeMs ?? 0) > 0) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, CARRIER_SPAWN_GRACE_MS);
+        });
+        const observation = await observeEntryStartup({
+          projectDir: input.projectDir,
+          pid: undefined,
+          budgetMs: input.observeMs as number,
+          platform,
+        });
+        if (observation.outcome !== "not-found") {
+          return withNote(withObservation({ ok: true, detail: `opened ${bundlePath}` }, observation), replacedNote);
+        }
+      }
+      return withNote({ ok: true, detail: `opened ${bundlePath}` }, replacedNote);
     }
     return {
       ok: false,
+      observed: undefined,
       detail: `${replacedNote}open ${bundlePath} failed with ${status ?? "spawn error"}`,
     };
   }
-  return withNote(spawnEntryCold(input.projectDir), replacedNote);
+  return coldStart();
 };
 
 const withNote = (result: OpenAppResult, note: string): OpenAppResult =>

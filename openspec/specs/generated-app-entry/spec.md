@@ -90,7 +90,9 @@ Killing the command (quit path or teardown) SHALL terminate the entire descendan
 
 The entry SHALL wrap its whole startup in a top-level error boundary. Any startup failure (including tray/session creation errors) SHALL append the error message and stack to `app.log` before exiting non-zero. No startup failure SHALL be silent.
 
-The entry SHALL NOT swallow window/bootstrap errors and continue as if the session existed: a failed `show()`, failed webview creation, failed layout commit, or failed channel open SHALL abort the carrier bootstrap with the error persisted to `app.log`. The toolbar carrier SHALL append one structured step record per bootstrap milestone (shell listen, tray create, window show, toolbar webview, content webview, layout, channel open) to `app.log`, so any later failure is attributable to a specific step without on-site archaeology.
+The entry SHALL NOT swallow window/bootstrap errors and continue as if the session existed: a failed `show()`, failed webview creation, failed layout commit, or failed channel open SHALL abort the carrier bootstrap with the error persisted to `app.log`. The toolbar carrier SHALL append one structured step record per bootstrap milestone (entry start, shell listen, tray create, window show, toolbar webview, content webview, layout, channel open) to `app.log`, so any later failure is attributable to a specific step without on-site archaeology.
+
+The first milestone SHALL be written BEFORE the broker handshake: the entry records its process identity (`entryStart`) before dialing the broker. A detached entry runs with stdio discarded, so an instance that dies mid-handshake (before any createTray milestone) would otherwise leave zero evidence — `entryStart` is what makes that death attributable.
 
 #### Scenario: SDK failure leaves a trace
 
@@ -112,6 +114,33 @@ The entry SHALL NOT swallow window/bootstrap errors and continue as if the sessi
 - **WHEN** bootstrap completes
 - **THEN** `app.log` contains one record per milestone in order
 - **AND** an operator can determine session health from `app.log` alone.
+
+#### Scenario: A mid-handshake death is attributable
+
+- **GIVEN** a detached entry whose broker handshake never completes (broker dies or the process is killed before createTray)
+- **WHEN** an operator inspects the project
+- **THEN** `app.log` exists and contains at least the `entryStart` record
+- **AND** the absence of a `createTray` record localizes the death to the handshake window.
+
+### Requirement: Opening a materialized app SHALL never wedge on a descriptor-less bundle
+
+The open-app vector SHALL treat a materialized Darwin bundle as carrier-openable only when the bundle also carries its launch descriptor (`opentray-launch.json`): the descriptor is committed only after a successful broker handshake, while bundle materialization happens DURING that handshake, so a first open whose entry died mid-handshake leaves a bundle whose every carrier open flash-quits on the missing descriptor. When the bundle exists without its descriptor, the open SHALL fall back to a detached cold start of the entry (whose successful handshake writes the descriptor); the NEXT open may then use the carrier.
+
+Webui-facing open vectors SHALL observe the first start for a bounded budget: an entry that dies before finishing startup (or whose app.log carries the startup-failure marker) SHALL be reported as a failed open carrying the app.log tail as the exception surface, and a still-alive entry SHALL be reported honestly as running without claiming broker readiness. Fire-and-forget CLI semantics remain the default when no observation budget is supplied.
+
+#### Scenario: A descriptor-less bundle self-heals on open
+
+- **GIVEN** a materialized bundle whose `opentray-launch.json` is absent (first open never completed)
+- **WHEN** any open-app vector runs
+- **THEN** the entry cold-starts detached instead of carrier-opening the bundle
+- **AND** a successful handshake writes the descriptor, unblocking later carrier opens.
+
+#### Scenario: An early entry death surfaces in the webui
+
+- **GIVEN** an open whose entry exits before finishing startup
+- **WHEN** the bounded observation settles
+- **THEN** the open result reports failure with the entry's app.log tail (or explains that no app.log was written)
+- **AND** the webui presents that detail to the operator instead of a generic error.
 
 ### Requirement: A URL application SHALL offer toolbar mode, always-reachable reload, and the durable window sync defaults
 

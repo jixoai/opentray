@@ -927,6 +927,10 @@ const handleApi = async (
         // No bundle is verified during generation anymore; open-app derives
         // the expected path and cold-starts the entry when it does not exist.
         bundlePath: undefined,
+        // Webui-facing surface: observe the first start so an entry that dies
+        // before the broker handshake is reported with its app.log evidence
+        // instead of a silent no-window (2026-10-07 first-open deadlock).
+        observeMs: 4000,
       });
       respond(
         response,

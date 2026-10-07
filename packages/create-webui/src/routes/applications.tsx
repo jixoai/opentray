@@ -192,12 +192,17 @@ export const ApplicationsRoute = (): React.JSX.Element => {
   };
 
   const open = async (app: AppRecord): Promise<void> => {
+    // 2026-10-07 首启死锁：open 端点正常/失败回包都是 { ok, detail }（detail
+    // 在失败时携带 entry 的 app.log 证据）；{ code, message } 只是 4xx 的
+    // 寻址错误形状。旧代码读 message，失败时把真实异常吞成了笼统文案。
     const response = await openApp(app.key);
     const data = response.data;
     setResult(
       response.status === 200 && "ok" in data && data.ok === true
         ? data.detail
-        : ("message" in data ? data.message : messages.common.error),
+        : ("detail" in data && data.detail !== undefined
+            ? data.detail
+            : "message" in data ? data.message : messages.common.error),
     );
   };
 

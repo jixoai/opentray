@@ -234,7 +234,10 @@ export const handleWorkbenchApi = async (
     if (projectDir === undefined) {
       return { status: 409, body: { code: "missing_payload", message: "application payload is unavailable" } };
     }
-    const opened = await openMaterializedApp({ projectDir, bundlePath: undefined });
+    // Webui-facing surface: observe the first start so an entry that dies
+    // before the broker handshake is reported with its app.log evidence
+    // instead of a silent no-window (2026-10-07 first-open deadlock).
+    const opened = await openMaterializedApp({ projectDir, bundlePath: undefined, observeMs: 4000 });
     return { status: opened.ok ? 200 : 500, body: opened };
   }
 

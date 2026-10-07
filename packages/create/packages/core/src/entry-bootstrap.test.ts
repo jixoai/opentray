@@ -397,8 +397,11 @@ describe("executed URL toolbar entry bootstrap (D5)", () => {
       const steps = events.filter((event) => event.status === "ok").map((event) => event.step);
       // Execution order for the URL entry: the tray is created before the
       // toolbar shell host listens. Every milestone has exactly one record,
-      // in the order the steps actually ran.
+      // in the order the steps actually ran. entryStart precedes the broker
+      // handshake (2026-10-07 first-open deadlock: a mid-handshake death must
+      // leave attributable evidence).
       expect(steps, `app.log narrative was: ${JSON.stringify(events)}`).toEqual([
+        "entryStart",
         "createTray",
         "listenShell",
         "showWindow",
@@ -448,9 +451,10 @@ describe("executed URL toolbar entry bootstrap (D5)", () => {
       });
 
       const steps = events.filter((event) => event.status === "ok").map((event) => event.step);
-      // The exact 7-milestone narrative (toEqual also fails on duplicates
+      // The exact 8-milestone narrative (toEqual also fails on duplicates
       // and on out-of-order records).
       expect(steps, `app.log narrative was: ${JSON.stringify(events)}`).toEqual([
+        "entryStart",
         "createTray",
         "listenShell",
         "showWindow",
@@ -590,11 +594,12 @@ describe("executed command entry noisy-output stress (Codex R3)", () => {
       });
       const quitMs = Date.now() - killStarted;
 
-      // Milestone order survives the storm: listenShell -> createTray (no
-      // service ports, so no showWindow records), exactly once each — the
-      // output storm never touches the milestone chain.
+      // Milestone order survives the storm: entryStart -> listenShell ->
+      // createTray (no service ports, so no showWindow records), exactly once
+      // each — the output storm never touches the milestone chain.
       const steps = events.filter((event) => event.status === "ok").map((event) => event.step);
       expect(steps, `app.log narrative was: ${JSON.stringify(events)}`).toEqual([
+        "entryStart",
         "listenShell",
         "createTray",
       ]);
@@ -646,9 +651,15 @@ describe("template milestone isomorphism (D5)", () => {
       expect(entry, name).toContain("const beginOutputShutdown = () => {");
       expect(entry, name).toContain("const OUTPUT_APPEND_TIMEOUT_MS =");
       expect(entry, name).toContain("await flushLogQueue();");
+      expect(entry, name).toContain('step: "entryStart"');
       expect(entry, name).toContain('step: "listenShell"');
       expect(entry, name).toContain('step: "createTray"');
       expect(entry, name).toContain('step: "showWindow"');
+      // Zoom shortcuts (2026-10-07): both templates project the config's
+      // explicit opt-out onto the window style (omission = kernel ON).
+      expect(entry, name).toContain(
+        "config.window.zoomShortcuts === false ? { zoomShortcuts: false } : {}",
+      );
         // The carrier receives the same structured sink in both templates.
       expect(entry, name).toContain("event: logEvent");
       // The swallowed initial show is gone; failures are recorded, then abort.

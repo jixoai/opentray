@@ -1,10 +1,16 @@
 import { spawn } from "node:child_process";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { openMaterializedApp, pinningHint, stopLiveAppInstances } from "./open-app";
+import {
+  observeEntryStartup,
+  openMaterializedApp,
+  pinningHint,
+  stopLiveAppInstances,
+} from "./open-app";
 
 describe("openMaterializedApp", () => {
   it("cold-starts the entry on darwin when no bundle exists", async () => {
@@ -41,6 +47,132 @@ describe("openMaterializedApp", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.detail).toContain("pid");
+  });
+
+  it("cold-starts the entry when the bundle exists WITHOUT its launch descriptor (2026-10-07 deadlock)", async () => {
+    // A first open whose entry died mid-handshake leaves a materialized
+    // bundle with no opentray-launch.json — carrier-opening it would
+    // flash-quit forever. Bundle presence alone must NOT route to `open`:
+    // the open falls back to a detached entry cold start (which writes the
+    // descriptor on its successful handshake).
+    const dir = await mkdtemp(join(tmpdir(), "open-descriptor-missing-"));
+    await mkdir(join(dir, "Stub.app"), { recursive: true });
+    const result = await openMaterializedApp({
+      projectDir: dir,
+      bundlePath: join(dir, "Stub.app"),
+      platform: "darwin",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("no launch descriptor");
+    expect(result.detail).toContain("pid");
+  });
+});
+
+describe("observeEntryStartup (first-open deadlock observability)", () => {
+  it("reports 'running' for a live entry within the budget", async () => {
+    const child = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(0), 1500)"], {
+      stdio: "ignore",
+    });
+    const pid = child.pid as number;
+    const observation = await observeEntryStartup({
+      projectDir: await mkdtemp(join(tmpdir(), "observe-running-")),
+      pid,
+      budgetMs: 500,
+    });
+    expect(observation.outcome).toBe("running");
+    expect(observation.pid).toBe(pid);
+  });
+
+  it("reports 'exited' with a no-app.log explanation when the entry dies pre-milestone", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "observe-exited-"));
+    const child = spawn(process.execPath, ["-e", "process.exit(0)"], { stdio: "ignore" });
+    const pid = child.pid as number;
+    await new Promise<void>((resolve) => {
+      child.once("close", () => resolve());
+    });
+    const observation = await observeEntryStartup({ projectDir: dir, pid, budgetMs: 2_000 });
+    expect(observation.outcome).toBe("exited");
+    expect(observation.logTail).toBeUndefined();
+  });
+
+  it("reports 'failed' with the app.log tail when the startup-failure marker is present", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "observe-failed-"));
+    await writeFile(
+      join(dir, "app.log"),
+      '{"step":"entryStart","status":"ok"}\n[create-opentray] startup failed: Error: kaboom\n',
+      "utf8",
+    );
+    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      stdio: "ignore",
+    });
+    try {
+      const observation = await observeEntryStartup({
+        projectDir: dir,
+        pid: child.pid as number,
+        budgetMs: 2_000,
+      });
+      expect(observation.outcome).toBe("failed");
+      expect(observation.logTail).toContain("kaboom");
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
+  it("surfaces an observed startup failure through openMaterializedApp (webui shape)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-observe-failed-"));
+    await writeFile(
+      join(dir, "main.mjs"),
+      [
+        'import { appendFileSync } from "node:fs";',
+        'appendFileSync(new URL("./app.log", import.meta.url), "entryStart ok\\n");',
+        'appendFileSync(new URL("./app.log", import.meta.url), "[create-opentray] startup failed: Error: kaboom\\n");',
+        "process.exit(1);",
+      ].join("\n"),
+      "utf8",
+    );
+    const result = await openMaterializedApp({
+      projectDir: dir,
+      bundlePath: undefined,
+      platform: "linux",
+      observeMs: 4_000,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.observed).toBe("failed");
+    expect(result.detail).toContain("FAILED during startup");
+    expect(result.detail).toContain("kaboom");
+  });
+
+  it("surfaces an observed pre-milestone exit through openMaterializedApp", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-observe-exited-"));
+    await writeFile(join(dir, "main.mjs"), "process.exit(3);\n", "utf8");
+    const result = await openMaterializedApp({
+      projectDir: dir,
+      bundlePath: undefined,
+      platform: "linux",
+      observeMs: 4_000,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.observed).toBe("exited");
+    expect(result.detail).toContain("exited before finishing startup");
+    expect(result.detail).toContain("without writing app.log");
+  });
+
+  it("keeps ok:true for a still-starting entry (honest non-claim)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "open-observe-running-"));
+    await writeFile(
+      join(dir, "main.mjs"),
+      "setTimeout(() => process.exit(0), 1500);\n",
+      "utf8",
+    );
+    const result = await openMaterializedApp({
+      projectDir: dir,
+      bundlePath: undefined,
+      platform: "linux",
+      observeMs: 500,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.observed).toBe("running");
+    expect(result.detail).toContain("entry is running");
   });
 });
 

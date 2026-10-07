@@ -78,6 +78,13 @@ const errorText = (error) => error instanceof Error ? error.message : String(err
 const logEvent = (record) => logSink(JSON.stringify({ time: new Date().toISOString(), event: "bootstrap", ...record }) + "\\n", "utf8");
 
 ${toolbarCarrierSource()}const main = async () => {
+  // First milestone BEFORE the broker handshake (first-open deadlock,
+  // 2026-10-07): a detached entry runs with stdio ignored, so an instance that
+  // dies mid-handshake leaves zero evidence unless something was already on
+  // disk. entryStart marks the process alive and about to dial the broker;
+  // anything between this record and createTray ok is attributable.
+  void logEvent({ step: "entryStart", status: "ok", pid: process.pid, node: process.version, cwd: process.cwd() });
+
   let appIcon;
   try {
     const manifest = JSON.parse(await readFile(resolve(PROJECT_DIR, "app-icon", "app-icon.json"), "utf8"));
@@ -188,7 +195,14 @@ ${toolbarCarrierSource()}const main = async () => {
     width: config.window.width,
     height: config.window.height,
     title: config.appName,
-    style: { appMode: true, autoHide: false, keepOnTop: false },
+    style: {
+      appMode: true,
+      autoHide: false,
+      keepOnTop: false,
+      // Zoom shortcuts (2026-10-07): omitted keeps the kernel default (ON);
+      // an explicit config false is the only opt-out.
+      ...(config.window.zoomShortcuts === false ? { zoomShortcuts: false } : {}),
+    },
     ...devtools,
     ...(toolbarReady ? {} : {
       ...(titleFollows ? { titleSync: { documentToWindow: true } } : {}),

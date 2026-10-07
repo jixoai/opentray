@@ -38,6 +38,13 @@ export interface CreateDialogProps {
   /** 分享冻结参数（未生成即可分享）——wizard-share-and-list-scan D3。 */
   onShare(): void;
   onOpenApp(): void;
+  /**
+   * 首启打开结果（2026-10-07 首启死锁）：onOpenApp 的异步回执——失败时
+   * 携带 entry 的 app.log 证据（entryStart/启动栈），成功时报告 entry
+   * 存活。null = 尚未点击过打开。创建本身成功的事实不受它影响，因此
+   * 不复用 error（那会把成功分支整体切到失败视图）。
+   */
+  openNote: { ok: boolean; text: string } | null;
   /** Dialog dismissal (X / Esc / overlay / 完成). */
   onClose(): void;
   /** Confirm-phase rejection reason (409s must not vanish). */
@@ -62,6 +69,7 @@ export function CreateDialog({
   onCreate,
   onShare,
   onOpenApp,
+  openNote,
   onClose,
   confirmError,
   onOpenChange,
@@ -228,6 +236,13 @@ export function CreateDialog({
                 {messages.dialog.openApp}
               </Button>
             </div>
+            {openNote !== null ? (
+              <p
+                className={`font-mono text-xs whitespace-pre-wrap break-all ${openNote.ok ? "text-muted-foreground" : "text-red-400"}`}
+              >
+                {openNote.text}
+              </p>
+            ) : null}
             <p className="text-xs text-muted-foreground">{result.pinHint}</p>
           </>
         ) : (

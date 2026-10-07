@@ -150,6 +150,13 @@ const listOwnedListeningPorts = async (rootPid) => {
 };
 
 const main = async () => {
+  // First milestone BEFORE the broker handshake (first-open deadlock,
+  // 2026-10-07): a detached entry runs with stdio ignored, so an instance that
+  // dies mid-handshake leaves zero evidence unless something was already on
+  // disk. entryStart marks the process alive and about to dial the broker;
+  // anything between this record and createTray ok is attributable.
+  void logEvent({ step: "entryStart", status: "ok", pid: process.pid, node: process.version, cwd: process.cwd() });
+
   let appIcon;
   try {
     const manifest = JSON.parse(await readFile(resolve(PROJECT_DIR, "app-icon", "app-icon.json"), "utf8"));
@@ -331,7 +338,14 @@ const main = async () => {
       width: 900,
       height: 560,
       title: \`\${baseTitle} — Terminal\`,
-      style: { appMode: true, autoHide: false, keepOnTop: false },
+      style: {
+        appMode: true,
+        autoHide: false,
+        keepOnTop: false,
+        // Zoom shortcuts (2026-10-07): omitted keeps the kernel default (ON);
+        // an explicit config false is the only opt-out.
+        ...(config.window.zoomShortcuts === false ? { zoomShortcuts: false } : {}),
+      },
       ...devtools,
     });
     // D5: a failed show leaves no session — record it and keep
@@ -376,7 +390,14 @@ const main = async () => {
         width: config.window.width,
         height: config.window.height,
         title: baseTitle,
-        style: { appMode: true, autoHide: false, keepOnTop: false },
+        style: {
+        appMode: true,
+        autoHide: false,
+        keepOnTop: false,
+        // Zoom shortcuts (2026-10-07): omitted keeps the kernel default (ON);
+        // an explicit config false is the only opt-out.
+        ...(config.window.zoomShortcuts === false ? { zoomShortcuts: false } : {}),
+      },
         ...devtools,
       });
       // harden-lifecycle-ownership D5: the show() before the carrier is a
@@ -419,7 +440,14 @@ const main = async () => {
       width: config.window.width,
       height: config.window.height,
       title: baseTitle,
-      style: { appMode: true, autoHide: false, keepOnTop: false },
+      style: {
+        appMode: true,
+        autoHide: false,
+        keepOnTop: false,
+        // Zoom shortcuts (2026-10-07): omitted keeps the kernel default (ON);
+        // an explicit config false is the only opt-out.
+        ...(config.window.zoomShortcuts === false ? { zoomShortcuts: false } : {}),
+      },
       ...devtools,
       ...(!titleFollows ? {} : { titleSync: { documentToWindow: true } }),
       ...(!iconFollows ? {} : { iconSync: { faviconToWindow: true } }),

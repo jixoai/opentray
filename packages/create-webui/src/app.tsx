@@ -148,6 +148,30 @@ function WizardPage(): React.JSX.Element {
     { projectDir: string; bundlePath?: string; pinHint: string } | undefined
   >();
   const [frozenValues, setFrozenValues] = React.useState<WizardFormValues>(EMPTY_VALUES);
+  // 首启打开回执（2026-10-07 首启死锁）：onOpenApp 丢弃响应让异步启动失败
+  // 完全不可见——现在消费 /api/open-app 的回包，失败时呈现后端带出的
+  // app.log 证据（entryStart milestone / 启动栈）。每次新创建重置。
+  const [openNote, setOpenNote] = React.useState<{ ok: boolean; text: string } | null>(null);
+  const openAppFromDialog = async (): Promise<void> => {
+    try {
+      const response = await api("/api/open-app", {});
+      const data = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        detail?: string;
+        error?: string;
+      };
+      if (response.status === 200 && data.ok === true) {
+        setOpenNote({ ok: true, text: data.detail ?? "opened" });
+        return;
+      }
+      setOpenNote({ ok: false, text: data.detail ?? data.error ?? messages.common.error });
+    } catch (error) {
+      setOpenNote({
+        ok: false,
+        text: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
 
   const terminalHostRef = React.useRef<HTMLDivElement>(null);
   const terminalRef = React.useRef<TerminalHandle | undefined>(undefined);
@@ -755,6 +779,7 @@ const selectedIconRefStale = (
             ...(payload.bundlePath === undefined ? {} : { bundlePath: payload.bundlePath }),
             pinHint: payload.pinHint,
           });
+          setOpenNote(null);
           // 创建完成：广播给应用列表页（挂载态下预热刷新）。
           window.dispatchEvent(new Event("create-opentray:apps-changed"));
           break;
@@ -1278,7 +1303,8 @@ const selectedIconRefStale = (
         onBack={() => void cancelConfirm()}
         onCreate={() => void createApp()}
         onShare={() => setShareOpen(true)}
-        onOpenApp={() => void api("/api/open-app", {})}
+        onOpenApp={() => void openAppFromDialog()}
+        openNote={openNote}
         confirmError={confirmError}
         onClose={() => {
           // 确认阶段的关闭（X/Esc/遮罩）等价于「返回修改」：解冻服务端表单，

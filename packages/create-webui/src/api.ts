@@ -150,6 +150,8 @@ export const exportApp = (
 export interface OpenAppResult {
   readonly ok: boolean;
   readonly detail: string;
+  /** Bounded first-start observation ("running" | "exited" | "failed" | "not-found"). */
+  readonly observed?: string;
 }
 
 /** Open a listed application (bundle launcher or detached cold start). */
