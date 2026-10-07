@@ -507,7 +507,10 @@ export const ApplicationsRoute = (): React.JSX.Element => {
         )}
 
         {result !== null && (
-          <p className="text-muted-foreground bg-muted mt-3 whitespace-pre-line rounded-md p-3 text-xs" role="status">
+          // vision 走查（add-create-kernel-upgrade 5.3）：灰底结果面板的
+          // 文字亮度提一档（muted → foreground/80），中英混排长行的低对比
+          // 可读性修正；仍保持 status 日志区的次级视觉层级。
+          <p className="text-foreground/80 bg-muted mt-3 whitespace-pre-line rounded-md p-3 text-xs" role="status">
             {result}
           </p>
         )}
