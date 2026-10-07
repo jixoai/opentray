@@ -460,7 +460,6 @@ export const openMaterializedApp = async (input: OpenAppInput): Promise<OpenAppR
     }
     return {
       ok: false,
-      observed: undefined,
       detail: `${replacedNote}open ${bundlePath} failed with ${status ?? "spawn error"}`,
     };
   }
