@@ -1,6 +1,6 @@
 {
   "name": "@opentray/create-webui",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "private": true,
   "type": "module",
   "description": "create-opentray wizard WebUI (React + shadcn/ui), built to static assets consumed by the create-opentray wizard server.",
