@@ -599,3 +599,23 @@ describe("app upgrade (add-create-kernel-upgrade)", () => {
     expect(text).toContain("no kernel packages");
   });
 });
+
+// 双布局寻址（add-create-kernel-upgrade D4 镜像）：升级接受目录 key 与点分
+// appId 两种拼写——webui 创建的 wizard 项目没有 v1 envelope，registration
+// 布局之外必须仍可寻址（wizard 布局本体由实机验收覆盖）。
+describe("app upgrade addressing (add-create-kernel-upgrade)", () => {
+  it("resolves a dotted appId through the encoded directory key", async () => {
+    await run(["create", "--app-id", "addr.example", "--app-name", "Addr", "--exec", "node"]);
+    // Empty the payload's kernel deps so the upgrade fails fast offline.
+    const payloadDir = join(home, ".opentray", "create", "addr-example", "app");
+    const manifestPath = join(payloadDir, "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.dependencies = {};
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+    // The dotted spelling must reach the project (encoded-key fallback).
+    const code = await run(["app", "upgrade", "addr.example"]);
+    expect(code).not.toBe(0);
+    const text = [...outLines, ...errLines].join("\n");
+    expect(text).toContain("no kernel packages");
+  });
+});

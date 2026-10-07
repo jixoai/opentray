@@ -19,7 +19,9 @@ import {
   buildScriptExport,
   deriveUrlPresets,
   err,
+  findCreateEntry,
   formatPosixCommandLine,
+  listCreateEntries,
   listRegistrations,
   loadRegistration,
   ok,
@@ -28,6 +30,7 @@ import {
   readResourceBytes,
   registrationKey,
   stopRunningApp,
+  toProjectDirectoryName,
   uninstallApp,
   upgradeAppKernel,
   type CreateConfigV1,
@@ -694,21 +697,37 @@ const appUpgradeCommand = (context: CliContext): CommandModule => ({
       finish(context, { ok: false, error: { code: "app_id_required", message: "pass one or more app ids, or --all" } }, json);
       return;
     }
+    // Dual-layout addressing (wizard-share-and-list-scan D4, mirrored from
+    // the webui open vector): wizard projects carry no v1 registration
+    // envelope, so the create-root entry scan — not loadRegistration — is
+    // the resolver. Both spellings resolve: the directory key and the dotted
+    // appId it was encoded from.
+    const resolveEntry = async (id: string) => {
+      const direct = await findCreateEntry(id, context.homeDir);
+      if (direct !== undefined) return direct;
+      return await findCreateEntry(toProjectDirectoryName(id), context.homeDir);
+    };
     // Sequential fan-out (plan D4): package-manager caches and the shared
     // runtime staging make parallel installs a liability, not a win.
     const targets: { key: string; projectDir: string | undefined }[] = [];
     if ((argv.all as boolean) === true) {
-      for (const record of await listRegistrations(context.homeDir)) {
-        targets.push({ key: record.key, projectDir: record.payloadPath });
+      for (const entry of await listCreateEntries(context.homeDir)) {
+        targets.push({
+          key: entry.key,
+          projectDir: entry.source === "wizard" ? entry.dir : entry.record.payloadPath,
+        });
       }
     } else {
-      for (const appId of explicit) {
-        const existing = await loadRegistration(registrationKey(appId), context.homeDir);
-        if (!existing.ok) {
-          finish(context, { ok: false, error: existing.error }, json);
+      for (const id of explicit) {
+        const entry = await resolveEntry(id);
+        if (entry === undefined) {
+          finish(context, { ok: false, error: { code: "not_found", message: `no application at ${id}` } }, json);
           return;
         }
-        targets.push({ key: existing.value.key, projectDir: existing.value.payloadPath });
+        targets.push({
+          key: entry.key,
+          projectDir: entry.source === "wizard" ? entry.dir : entry.record.payloadPath,
+        });
       }
     }
     if (targets.length === 0) {
