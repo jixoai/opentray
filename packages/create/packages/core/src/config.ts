@@ -72,6 +72,11 @@ export interface WindowConfig {
   readonly titleFollowsDocument: boolean;
   /** Runtime favicon→window-icon following; D13 default false (opt-in). */
   readonly iconFollowsDocument: boolean;
+  /**
+   * Keyboard zoom shortcuts (⌘/Ctrl+Plus / Minus / Zero → focused webview
+   * page zoom), 2026-10-07. Omitted = kernel default (ON); `false` opts out.
+   */
+  readonly zoomShortcuts?: boolean;
 }
 
 export interface CreateConfigV1 {
@@ -255,6 +260,7 @@ const windowSchema = z
     toolbar: z.boolean().optional(),
     titleFollowsDocument: z.boolean().default(true),
     iconFollowsDocument: z.boolean().default(false),
+    zoomShortcuts: z.boolean().optional(),
   })
   .strict()
   .default(DEFAULT_WINDOW);

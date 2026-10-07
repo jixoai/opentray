@@ -33,6 +33,10 @@ pub(super) struct WindowStyleState {
     pub(super) resizable_override: Option<bool>,
     pub(super) keep_on_top: bool,
     pub(super) auto_hide: bool,
+    /// Keyboard zoom shortcuts (Cmd+Plus/Minus/Zero) gate. Set at show time
+    /// from the common style; retained set-style updates keep it unchanged
+    /// (initial-only fact, like the show vector that carried it).
+    pub(super) zoom_shortcuts: bool,
     pub(super) opacity: f64,
     pub(super) background: WebviewWindowBackground,
     pub(super) platform: WindowPlatformStyleState,
@@ -59,6 +63,7 @@ impl Default for WindowStyleState {
             resizable_override: None,
             keep_on_top: false,
             auto_hide: true,
+            zoom_shortcuts: true,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
             platform: WindowPlatformStyleState {

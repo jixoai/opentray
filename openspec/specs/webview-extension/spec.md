@@ -1359,6 +1359,34 @@ This rule applies to ordinary framed and material-backed windows as well as the 
 - **THEN** the native projection is hidden without destroying the session
 - **AND** operational visibility changes to false exactly once.
 
+### Requirement: Keyboard zoom shortcuts SHALL be a common native window-shell capability
+
+`WebviewWindowStyle` SHALL expose common boolean `zoomShortcuts` with an effective default of `true`: keyboard shortcuts (⌘/Ctrl+Plus, ⌘/Ctrl+Minus, ⌘/Ctrl+Zero) SHALL adjust the page zoom of the window session's focused webview. The zoom ladder SHALL be geometric (±20% per activation) clamped to `[0.25, 5.0]`, and the Zero shortcut SHALL reset to `1.0`. No page can raise its own window shell's shortcuts, so the native shell owns this capability; consuming a shortcut key combination SHALL NOT deliver that key event to the page.
+
+The gate SHALL be an initial-only style fact: the show/create that builds the window seeds it, and a retained set-style request SHALL NOT reinterpret it. macOS SHALL implement the shortcuts through a process-wide native keyDown monitor routed per window session (an empty routing table is a pure pass-through); Windows SHALL project onto WebView2 browser accelerator keys, and an explicit `zoomShortcuts: false` opt-out on Windows SHALL disable the accelerator-key family as documented platform truth. The window capability DTO SHALL serialize the session's current `zoomShortcuts` value on both platforms.
+
+#### Scenario: Default window zooms with keyboard shortcuts
+
+- **GIVEN** a window session created with the default style and a focused webview
+- **WHEN** the operator presses ⌘/Ctrl+Plus twice, then ⌘/Ctrl+Minus once
+- **THEN** the focused webview's page zoom follows the geometric ladder clamped to `[0.25, 5.0]`
+- **AND** the pressed combinations are not delivered to the page as key events.
+
+#### Scenario: Zero resets and the opt-out gate holds
+
+- **GIVEN** a window session whose focused webview is zoomed beyond `1.0`
+- **WHEN** the operator presses ⌘/Ctrl+Zero
+- **THEN** the focused webview's page zoom returns to `1.0`.
+- **GIVEN** a window session created with `zoomShortcuts: false`
+- **WHEN** the operator presses the shortcut combinations
+- **THEN** no page zoom change occurs and the keys flow to the platform as if the gate were absent.
+
+#### Scenario: A retained style patch keeps the show-time gate
+
+- **GIVEN** a window session created with `zoomShortcuts: true`
+- **WHEN** a retained set-style request carries other style fields
+- **THEN** the session keeps its show-time zoom-shortcut gate unchanged.
+
 #### Scenario: A pinned surface stays visible
 
 - **GIVEN** a visible retained WebView has `keepOnTop: true`

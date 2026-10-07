@@ -1992,6 +1992,7 @@ describe("@opentray/ext-webview", () => {
           keepOnTop: true,
           autoHide: false,
           opacity: 0.88,
+          zoomShortcuts: true,
           background: { kind: "opaque" },
           platform: {
             windows: { cornerPreference: "round" },
@@ -2007,6 +2008,7 @@ describe("@opentray/ext-webview", () => {
           keepOnTop: true,
           autoHide: false,
           opacity: 0.88,
+          zoomShortcuts: true,
           background: { kind: "semantic", token: "blur", state: "active" },
           platform: {
             windows: { cornerPreference: "round" },

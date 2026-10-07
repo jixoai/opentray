@@ -232,6 +232,12 @@ export interface WebviewWindowStyle {
   keepOnTop: boolean;
   /** Hide the retained tray surface after native focus loss unless it is kept on top. */
   autoHide: boolean;
+  /**
+   * Keyboard zoom shortcuts (⌘/Ctrl+Plus / Minus / Zero) adjust the focused
+   * webview's page zoom. Defaults to true; an initial-only style fact set by
+   * the show that created the window.
+   */
+  zoomShortcuts: boolean;
   opacity: number;
   background: WebviewWindowBackground;
   platform: WebviewWindowPlatformStyle;
@@ -245,6 +251,13 @@ export interface WebviewWindowStylePatch {
   keepOnTop?: boolean;
   /** Defaults to true; keepOnTop suppresses native auto-hide without changing this value. */
   autoHide?: boolean;
+  /**
+   * Keyboard zoom shortcuts (⌘/Ctrl+Plus / Minus / Zero) for the focused
+   * webview's page zoom. Defaults to true. Show-time fact: honored by the
+   * show/create that builds the window; a retained setStyle ignores it
+   * (the window keeps its show-time gate).
+   */
+  zoomShortcuts?: boolean;
   opacity?: number;
   background?: WebviewWindowBackgroundInput;
   platform?: {
@@ -308,6 +321,11 @@ export interface WebviewWindowCapabilities {
   screenBindingsSupported: boolean;
   platform: string;
   background: boolean;
+  /**
+   * Current session gate of the keyboard zoom-shortcut capability
+   * (⌘/Ctrl+Plus / Minus / Zero → focused webview page zoom).
+   */
+  zoomShortcuts: boolean;
   platformCapabilities: WebviewWindowPlatformCapabilities;
 }
 

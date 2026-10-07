@@ -30,6 +30,7 @@ mod soft_resize;
 mod style;
 mod window_delegate;
 mod window_state;
+mod zoom_shortcuts;
 
 use std::{
     cell::RefCell,
@@ -576,6 +577,10 @@ struct WindowCapabilities {
     /// session-owned plain popup windows. Both platforms' DTOs serialize
     /// this field.
     popup_windows: bool,
+    /// Keyboard zoom shortcuts (2026-10-07): reports the session's current
+    /// gate — the capability itself is always available; both platforms'
+    /// DTOs serialize this field.
+    zoom_shortcuts: bool,
     webview_push_events: Vec<&'static str>,
     platform_capabilities: WindowPlatformCapabilities,
 }
@@ -1642,7 +1647,12 @@ impl MacosWebviewRuntime {
                 );
                 let mut tracker = session.layout_tracker.borrow_mut();
                 tracker.add_webview(webview_id, native.webview.as_ref(), Rc::clone(&events));
+                // Zoom-shortcut routing joins every sibling webview of the
+                // session's window (2026-10-07). Clone the retained
+                // WKWebView before the handle moves into the session map.
+                let zoom_view = native.webview.webview();
                 session.webviews.insert(webview_id.to_string(), native);
+                zoom_shortcuts::add_webview(&session.window, webview_id, zoom_view);
                 // The effective layout decides the child's place immediately:
                 // referenced views move, unreferenced views stay hidden until
                 // a layout claims them (default layout = first webview only).
@@ -1920,6 +1930,7 @@ impl MacosWebviewRuntime {
                 );
             self::bridge::deliver_channel_pushes(&session.bridge, &pushes, None);
             session.focus_tracker.borrow_mut().remove_target(webview_id);
+            zoom_shortcuts::remove_webview(&session.window, webview_id);
             session.bridge.borrow_mut().remove_view(webview_id);
             {
                 let mut bridge = session.bridge.borrow_mut();
@@ -2131,6 +2142,8 @@ impl MacosWebviewRuntime {
             WebviewRuntimeError::Unsupported("webview runtime requires the main thread".into())
         })?;
         validate_initial_style(&show_settings)?;
+        // Captured before `show_settings` moves into the window session.
+        let zoom_shortcuts_enabled = show_settings.window.style.zoom_shortcuts;
         let content_descriptor = initial_content_descriptor(html.as_ref(), url.as_ref());
         let page_source = page_source_state_for_content(&content_descriptor);
         let tray_id = owner.tray_id.clone();
@@ -2182,6 +2195,7 @@ impl MacosWebviewRuntime {
                 resizable_override: show_settings.window.style.resizable,
                 keep_on_top: show_settings.window.style.keep_on_top,
                 auto_hide: show_settings.window.style.auto_hide,
+                zoom_shortcuts: show_settings.window.style.zoom_shortcuts,
                 opacity: show_settings.window.style.opacity,
                 background: show_settings.window.style.background.clone(),
                 platform: self::style::WindowPlatformStyleState {
@@ -2331,6 +2345,19 @@ impl MacosWebviewRuntime {
             );
         }
         self.sessions.insert(tray_id.clone(), session);
+        // Zoom-shortcut routing (2026-10-07): the common style's gate seeds
+        // the process monitor's per-window target; the primary webview (any)
+        // joins it so Cmd+Plus/Minus/Zero zooms the focused view.
+        zoom_shortcuts::register_session(
+            &window,
+            zoom_shortcuts_enabled,
+            Rc::clone(&focus_tracker),
+        );
+        if let Some(session) = self.sessions.get(&tray_id) {
+            for (webview_id, native) in &session.webviews {
+                zoom_shortcuts::add_webview(&window, webview_id, native.webview.webview());
+            }
+        }
         focus_tracker.borrow().reconcile(&window);
         Ok(())
     }
@@ -2555,6 +2582,8 @@ impl MacosWebviewRuntime {
         // destroy); popups owned by other trays are never touched.
         self.popups.borrow_mut().close_all_of_tray(tray_id);
         if let Some(session) = self.sessions.remove(tray_id) {
+            // Zoom-shortcut routing dies with the window session (2026-10-07).
+            zoom_shortcuts::remove_session(&session.window);
             // Channel law (D20): window destruction is a destroy entrance —
             // open channels close with the caller's reason, endpoints still
             // live observe once, host observations ride this command's
@@ -2998,6 +3027,9 @@ fn apply_reused_show_updates(
             resizable_override: show_settings.window.style.resizable,
             keep_on_top: show_settings.window.style.keep_on_top,
             auto_hide: show_settings.window.style.auto_hide,
+            // Initial-only fact: retained set-style updates never reinterpret
+            // the zoom-shortcut gate (the set-style wire carries no field).
+            zoom_shortcuts: session.bridge.borrow().style.zoom_shortcuts,
             opacity: show_settings.window.style.opacity,
             background: show_settings.window.style.background.clone(),
             platform: self::style::WindowPlatformStyleState {
@@ -3239,6 +3271,7 @@ impl NavigatorWindowBridge {
             webview_bridge_policy: true,
             message_channels: true,
             popup_windows: true,
+            zoom_shortcuts: self.style.zoom_shortcuts,
             // geometryChange joins the unified push family with the layout
             // batch (D23): layout commits and overlay metric changes now
             // recompute per-view projections natively. loadState joined with

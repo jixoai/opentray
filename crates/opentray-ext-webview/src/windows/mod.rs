@@ -381,6 +381,11 @@ struct WindowStyleState {
     resizable_override: Option<bool>,
     keep_on_top: bool,
     auto_hide: bool,
+    /// Keyboard zoom shortcuts (Ctrl+Plus/Minus/Zero) gate, set at show
+    /// time from the common style (2026-10-07). On Windows the shortcuts
+    /// ride WebView2's browser accelerator keys; disabling them disables the
+    /// accelerator family (documented platform truth, see webview attach).
+    zoom_shortcuts: bool,
     opacity: f64,
     background: WebviewWindowBackground,
     platform: WindowPlatformStyleState,
@@ -667,6 +672,10 @@ struct WindowCapabilities {
     /// external browser). Both platforms' capability DTOs serialize this
     /// field.
     popup_windows: bool,
+    /// Keyboard zoom shortcuts (2026-10-07): reports the session's current
+    /// gate — the capability itself is always available; both platforms'
+    /// DTOs serialize this field.
+    zoom_shortcuts: bool,
     webview_push_events: Vec<&'static str>,
     platform_capabilities: WindowPlatformCapabilities,
 }
@@ -2542,7 +2551,31 @@ fn build_webview(
         owner,
     )?;
     install_download_handlers(webview.as_ref(), bridge)?;
+    // Zoom-shortcut gate, Windows projection (2026-10-07): WebView2's
+    // browser accelerator keys provide Ctrl+Plus/Minus/Zero zoom by default,
+    // so the default-on common style needs no action here. An explicit
+    // opt-out disables the accelerator family — it has no zoom-only switch,
+    // which is documented platform truth, never a silent partial.
+    if !bridge.borrow().style.zoom_shortcuts {
+        disable_browser_accelerator_keys(webview.as_ref())?;
+    }
     Ok(webview)
+}
+
+/// Disables WebView2's browser accelerator keys (Ctrl+Plus/Minus/Zero zoom,
+/// Ctrl+F/R/P family). Only reachable for an explicit `zoomShortcuts: false`.
+fn disable_browser_accelerator_keys(webview: &WebView) -> Result<(), WebviewRuntimeError> {
+    let core = webview.webview();
+    let settings = unsafe { core.Settings() }.map_err(|error| {
+        WebviewRuntimeError::Internal(format!("WebView2 settings unavailable: {error}"))
+    })?;
+    unsafe { settings.SetAreBrowserAcceleratorKeysEnabled(windows::core::BOOL::from(false)) }
+        .map_err(|error| {
+            WebviewRuntimeError::Internal(format!(
+                "disabling WebView2 accelerator keys failed: {error}"
+            ))
+        })?;
+    Ok(())
 }
 
 /// Routes one pushed per-view event frame through the D19 batch B routing
@@ -3110,6 +3143,7 @@ fn window_style_from_initial(
         resizable_override: style.resizable,
         keep_on_top: style.keep_on_top,
         auto_hide: style.auto_hide,
+        zoom_shortcuts: style.zoom_shortcuts,
         opacity: normalize_opacity(style.opacity)?,
         background: normalize_windows_background(&style.background)?,
         platform: WindowPlatformStyleState {
@@ -6109,6 +6143,10 @@ impl NavigatorWindowBridge {
             // popup windows (handled, never delegated to an external
             // browser) — task 8.4.
             popup_windows: true,
+            // 2026-10-07: current session gate of the zoom-shortcut
+            // capability (Ctrl+Plus/Minus/Zero via WebView2 accelerator
+            // keys).
+            zoom_shortcuts: self.style.zoom_shortcuts,
             // geometryChange joins the unified push family with the layout
             // batch (D23): layout commits and overlay metric changes
             // recompute per-view projections natively. loadState joins
@@ -6992,6 +7030,7 @@ mod tests {
                 resizable_override: None,
                 keep_on_top: false,
                 auto_hide: true,
+                zoom_shortcuts: true,
                 opacity: 1.0,
                 background: WebviewWindowBackground::Opaque,
                 platform: WindowPlatformStyleState {
@@ -7275,6 +7314,7 @@ mod tests {
             resizable_override: None,
             keep_on_top: false,
             auto_hide: true,
+            zoom_shortcuts: true,
             opacity: 1.0,
             background: crate::WebviewWindowBackground::Semantic {
                 token: "blur".to_string(),

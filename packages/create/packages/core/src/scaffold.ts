@@ -46,6 +46,12 @@ export interface ScaffoldAppConfig {
     readonly toolbar?: boolean;
     readonly titleFollowsDocument: boolean;
     readonly iconFollowsDocument: boolean;
+    /**
+     * Keyboard zoom shortcuts (⌘/Ctrl+Plus / Minus / Zero → focused webview
+     * page zoom), 2026-10-07. Omitted = the kernel default (ON): generated
+     * apps are zoomable out of the box; `false` is the explicit opt-out.
+     */
+    readonly zoomShortcuts?: boolean;
   };
   /** Tray icon asset (written by materialize); omitted → text-only tray. */
   readonly trayIcon?: { readonly path: string; readonly template: boolean };

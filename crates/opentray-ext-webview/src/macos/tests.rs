@@ -1437,6 +1437,7 @@ fn window_style_state_serializes_keep_on_top() {
         resizable_override: None,
         keep_on_top: true,
         auto_hide: false,
+        zoom_shortcuts: true,
         opacity: 0.82,
         background: WebviewWindowBackground::PlatformMaterial {
             material: "hudWindow".to_string(),
@@ -1452,6 +1453,7 @@ fn window_style_state_serializes_keep_on_top() {
 
     assert_eq!(value["keepOnTop"], Value::Bool(true));
     assert_eq!(value["autoHide"], Value::Bool(false));
+    assert_eq!(value["zoomShortcuts"], Value::Bool(true));
     assert_eq!(value["opacity"], Value::from(0.82));
     assert_eq!(
         value["background"]["kind"],

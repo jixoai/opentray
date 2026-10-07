@@ -93,6 +93,12 @@ pub(crate) struct WebviewInitialStyle {
     pub resizable: Option<bool>,
     pub keep_on_top: bool,
     pub auto_hide: bool,
+    /// Keyboard zoom shortcuts (Cmd/Ctrl+Plus/Minus/Zero) adjust the focused
+    /// webview's page zoom (2026-10-07). Default ON: the platform only builds
+    /// what the web cannot do itself, and no page can raise its own window
+    /// shell's shortcut. Windows projects this onto WebView2 browser
+    /// accelerator keys; macOS installs a native keyDown monitor.
+    pub zoom_shortcuts: bool,
     pub opacity: f64,
     pub background: WebviewWindowBackground,
     pub platform: WebviewInitialPlatformStyle,
@@ -106,6 +112,7 @@ impl Default for WebviewInitialStyle {
             resizable: None,
             keep_on_top: false,
             auto_hide: true,
+            zoom_shortcuts: true,
             opacity: 1.0,
             background: WebviewWindowBackground::Opaque,
             platform: WebviewInitialPlatformStyle::default(),
@@ -676,6 +683,7 @@ struct ShowWindowStyleData {
     resizable: Option<bool>,
     keep_on_top: Option<bool>,
     auto_hide: Option<bool>,
+    zoom_shortcuts: Option<bool>,
     opacity: Option<f64>,
     background: Option<WebviewBackgroundInput>,
     platform: Option<ShowWindowPlatformStyleData>,
@@ -1146,6 +1154,9 @@ fn parse_webview_command(data: &Value) -> Result<WebviewCommand, WebviewRuntimeE
                                 .unwrap_or_default(),
                             keep_on_top: style.and_then(|style| style.keep_on_top).unwrap_or(false),
                             auto_hide: style.and_then(|style| style.auto_hide).unwrap_or(true),
+                            zoom_shortcuts: style
+                                .and_then(|style| style.zoom_shortcuts)
+                                .unwrap_or(true),
                             platform: WebviewInitialPlatformStyle {
                                 macos: WebviewInitialMacosStyle {
                                     corner_radius: macos_style
@@ -2365,6 +2376,7 @@ mod tests {
                             resizable: Some(true),
                             keep_on_top: true,
                             auto_hide: false,
+                            zoom_shortcuts: true,
                             opacity: 0.72,
                             background: WebviewWindowBackground::PlatformMaterial {
                                 material: "hudWindow".to_string(),
@@ -2410,6 +2422,32 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn parse_show_command_zoom_shortcuts_defaults_on_and_parses_explicit_false() {
+        // The common capability defaults ON (2026-10-07): no page can raise
+        // its own window shell's shortcut, so the shell owns it; an explicit
+        // false is the caller's opt-out.
+        let default_command = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "style": { "appMode": true }
+        }))
+        .expect("show command");
+        let WebviewCommand::Show { show_settings, .. } = default_command else {
+            panic!("expected show command");
+        };
+        assert!(show_settings.window.style.zoom_shortcuts);
+
+        let opted_out = parse_webview_command(&serde_json::json!({
+            "type": "show",
+            "style": { "appMode": true, "zoomShortcuts": false }
+        }))
+        .expect("show command");
+        let WebviewCommand::Show { show_settings, .. } = opted_out else {
+            panic!("expected show command");
+        };
+        assert!(!show_settings.window.style.zoom_shortcuts);
     }
 
     #[test]
