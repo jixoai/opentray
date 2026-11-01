@@ -41,7 +41,12 @@ import {
   BrokerServerError,
 } from "./client";
 import { resolveCallerLabel } from "./daemon/caller-label";
-import { createNodeDaemonDriver, startDaemon, type DaemonDriver } from "./daemon/lifecycle";
+import {
+  createNodeDaemonDriver,
+  restartDaemon,
+  startDaemon,
+  type DaemonDriver,
+} from "./daemon/lifecycle";
 import { readPackageVersion } from "./daemon/package-version";
 import { resolveDaemonPaths } from "./daemon/paths";
 import type { DaemonPaths } from "./daemon/paths";
@@ -266,11 +271,22 @@ export const connectLocalBroker = async (
       ...(options.appIcon === undefined ? {} : { appIcon: options.appIcon }),
       ...(packageIdentity === undefined ? {} : { packageIdentity }),
     });
-  const expectedBrokerArtifactIdentity = autoStart
+  let expectedBrokerArtifactIdentity = autoStart
     ? (await startDaemon({ paths, driver })).broker.artifactIdentity
     : (options.expectedBrokerArtifactIdentity ??
       (await driver.resolveBroker(paths)).artifactIdentity);
-  const socket = await connectSocket(endpoint);
+  let socket: BrokerSocket;
+  try {
+    socket = await connectSocket(endpoint);
+  } catch (error) {
+    // A ready/live broker whose endpoint is absent is stale runtime state
+    // (e.g. Windows recycled the recorded PID). Restart once; stopDaemon only
+    // signals a broker it can prove is the recorded one.
+    if (!autoStart || !isConnectEnoent(error, endpoint)) throw error;
+    expectedBrokerArtifactIdentity = (await restartDaemon({ paths, driver })).broker
+      .artifactIdentity;
+    socket = await connectSocket(endpoint);
+  }
   const connection = new LocalBrokerConnection(socket, endpoint, callerLabel);
 
   try {
@@ -812,6 +828,16 @@ const connectSocket = (endpoint: string): Promise<BrokerSocket> =>
     });
     socket.once("error", reject);
   });
+
+const isConnectEnoent = (error: unknown, endpoint: string): boolean => {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as NodeJS.ErrnoException & { address?: string };
+  return (
+    candidate.code === "ENOENT" &&
+    candidate.syscall === "connect" &&
+    (candidate.address === undefined || candidate.address === endpoint)
+  );
+};
 
 const responseRequestId = (frame: ServerFrame): RequestId | undefined => {
   switch (frame.type) {

@@ -68,6 +68,25 @@ describe("local broker client", () => {
     await connection.close();
   });
 
+  it("restarts once when a recorded broker has no listening endpoint", async () => {
+    const homeDir = await makeTempHome();
+    const driver = createEnoentThenReadyDriver();
+    cleanup.push(driver.close);
+
+    const connection = await connectLocalBroker({
+      homeDir,
+      packageVersion: "0.1.0",
+      clientVersion: "test-client",
+      appId: "com.example.reconnect",
+      daemonDriver: driver,
+    });
+
+    expect(driver.spawned).toBe(2);
+    expect(connection.sessionId).toBe("session-test");
+
+    await connection.close();
+  });
+
   it("derives the caller label from the appId slug, never the display name (D4)", async () => {
     const homeDir = await makeTempHome();
     const driver = createSocketBrokerDriver();
@@ -1365,6 +1384,53 @@ const prepareLegacyBundle = async (bundlePath: string, appId: string): Promise<v
     join(bundlePath, "Contents/Info.plist"),
     `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleExecutable</key><string>opentray</string><key>CFBundleIdentifier</key><string>${appId}</string></dict></plist>\n`,
   );
+};
+
+/** First spawn publishes ready.json without listening (the stale-PID shape);
+ *  the restart path must stop it and spawn a listening replacement. */
+const createEnoentThenReadyDriver = (): DaemonDriver & {
+  readonly spawned: number;
+  close(): Promise<void>;
+} => {
+  const firstPid = 20_000;
+  const secondPid = 20_001;
+  const alive = new Set<number>();
+  const sockets = new Set<Socket>();
+  let spawned = 0;
+  let server: Server | undefined;
+
+  return {
+    get spawned() {
+      return spawned;
+    },
+    async resolveBroker(paths) {
+      return resolvedBroker(paths);
+    },
+    async isAlive(pid) {
+      return alive.has(pid);
+    },
+    async spawnBroker(paths, broker) {
+      spawned += 1;
+      if (spawned === 1) {
+        alive.add(firstPid);
+        await mkdir(dirname(paths.readyFile), { recursive: true });
+        await writeReadyMetadata(paths, firstPid, broker.artifactIdentity);
+        return firstPid;
+      }
+      alive.add(secondPid);
+      server = createReadyServer(paths, broker.artifactIdentity, undefined, sockets, []);
+      await listen(server, paths.endpoint);
+      await writeReadyMetadata(paths, secondPid, broker.artifactIdentity);
+      return secondPid;
+    },
+    async stop(pid) {
+      alive.delete(pid);
+    },
+    async close() {
+      await closeServer(server);
+      server = undefined;
+    },
+  };
 };
 
 const createSocketBrokerDriver = (

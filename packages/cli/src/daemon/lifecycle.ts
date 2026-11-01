@@ -1,7 +1,8 @@
 // Orthogonal intents (updated 2026-07-21; original user requests: detached
 // brokers must be caller-scoped, artifact-coherent, and diagnosable by default):
 // 1. Start, inspect, restart, and stop one caller-scoped broker under a lock.
-// 2. Reject liveness-only reuse through exact ready artifact identity.
+// 2. Reject liveness-only reuse through exact ready artifact identity and a
+//    live executable identity check (PID reuse must never win reuse or a signal).
 // 3. Preserve Darwin stable-bundle live-owner protection.
 // 4. Persist detached broker output and early exit identity unless explicitly overridden.
 // 5. Bound native cold-start readiness and recover caller locks left by dead processes.
@@ -31,6 +32,7 @@ import {
 
 import { resolveBrokerArtifact, type ResolvedBrokerArtifact } from "./broker-command";
 import type { DaemonPaths } from "./paths";
+import { resolveProcessExecutablePath } from "./process-identity";
 import type { AppIcon } from "@opentray/spec";
 import type { OpenTrayAppBundleOptions, OpenTrayPackageIdentity } from "@opentray/packaging";
 import { clearDarwinAppBundleOwner, writeDarwinAppBundleOwner } from "@opentray/packaging";
@@ -57,7 +59,7 @@ export type DaemonStartResult =
 
 export type DaemonStopResult =
   | { status: "stopped"; pid: number; paths: DaemonPaths }
-  | { status: "not-running"; paths: DaemonPaths };
+  | { status: "not-running"; paths: DaemonPaths; stalePid?: number };
 
 export type DaemonInspectResult =
   | { status: "running"; pid: number; paths: DaemonPaths }
@@ -68,6 +70,13 @@ export interface DaemonDriver {
   isAlive(pid: number): Promise<boolean>;
   spawnBroker(paths: DaemonPaths, broker: ResolvedBrokerArtifact): Promise<number>;
   stop(pid: number): Promise<void>;
+  /**
+   * Best-effort live executable path used to prove a recorded PID still belongs
+   * to the broker before reuse or signalling. Returning undefined means the
+   * identity is unknown. Omitting the method keeps legacy liveness-only
+   * behaviour for custom drivers; the built-in Node driver always implements it.
+   */
+  executablePath?(pid: number): Promise<string | undefined>;
 }
 
 export interface StartDaemonOptions {
@@ -109,6 +118,9 @@ export const createNodeDaemonDriver = (
   },
   async isAlive(pid) {
     return isProcessAlive(pid);
+  },
+  async executablePath(pid) {
+    return resolveProcessExecutablePath(pid);
   },
   async spawnBroker(paths, broker) {
     // The caller label flows to the broker via both a CLI flag and an env var.
@@ -251,6 +263,12 @@ export const startDaemon = async ({
       broker = await driver.resolveBroker(paths);
     } catch (error) {
       if (existingAlive && isBundleInUseError(error) && existingPid !== undefined) {
+        const identity = await identifyRecordedBroker(paths, existingPid, driver);
+        if (identity !== "verified" && identity !== "unsupported") {
+          // The bundle owner marker names a PID we cannot prove is the broker;
+          // surface the original conflict instead of signalling a recycled PID.
+          throw error;
+        }
         await driver.stop(existingPid);
         if (!(await waitUntilStopped(driver, existingPid))) {
           throw new Error(
@@ -265,8 +283,9 @@ export const startDaemon = async ({
     }
     if (existingPid !== undefined && existingAlive) {
       const ready = await readReadyMetadata(paths.readyFile);
+      const identity = await identifyRecordedBroker(paths, existingPid, driver);
       // Liveness is not compatibility: only the exact resolved executable may win reuse.
-      if (readyMatchesBroker(ready, paths, existingPid, broker)) {
+      if (readyMatchesBroker(ready, paths, existingPid, broker) && identity !== "mismatch") {
         return {
           status: "already-running",
           pid: existingPid,
@@ -274,11 +293,16 @@ export const startDaemon = async ({
           broker,
         };
       }
-      await driver.stop(existingPid);
-      if (!(await waitUntilStopped(driver, existingPid))) {
-        throw new Error(
-          `incompatible daemon broker did not stop within the bounded shutdown window: pid=${existingPid}`,
-        );
+      // A verified recorded broker is safe to replace. An unverified PID may
+      // have been recycled by an unrelated process: never signal it; drop the
+      // stale runtime files and start a fresh broker instead.
+      if (identity === "verified" || identity === "unsupported") {
+        await driver.stop(existingPid);
+        if (!(await waitUntilStopped(driver, existingPid))) {
+          throw new Error(
+            `incompatible daemon broker did not stop within the bounded shutdown window: pid=${existingPid}`,
+          );
+        }
       }
     }
 
@@ -314,6 +338,14 @@ export const stopDaemon = async ({
     return { status: "not-running", paths };
   }
 
+  const identity = await identifyRecordedBroker(paths, pid, driver);
+  if (identity === "mismatch" || identity === "unknown") {
+    // The PID is alive but cannot be proven to be the recorded broker (Windows
+    // reuses PIDs aggressively): never signal it; discard only stale metadata.
+    await cleanupRuntimeFiles(paths);
+    return { status: "not-running", paths, stalePid: pid };
+  }
+
   await driver.stop(pid);
   if (!(await waitUntilStopped(driver, pid))) {
     throw new Error(`daemon broker did not stop within the bounded shutdown window: pid=${pid}`);
@@ -333,7 +365,12 @@ export const inspectDaemon = async ({
 }: InspectDaemonOptions): Promise<DaemonInspectResult> => {
   const pid = await readPid(paths.pidFile);
   if (pid !== undefined && (await driver.isAlive(pid))) {
-    return { status: "running", pid, paths };
+    const identity = await identifyRecordedBroker(paths, pid, driver);
+    if (identity !== "mismatch") {
+      return { status: "running", pid, paths };
+    }
+    await cleanupRuntimeFiles(paths);
+    return { status: "not-running", paths, stalePid: pid };
   }
 
   await cleanupRuntimeFiles(paths);
@@ -445,6 +482,28 @@ const readReadyMetadata = async (readyFile: string): Promise<BrokerReadyMetadata
     executablePath: value.executablePath,
     brokerArtifactIdentity: value.brokerArtifactIdentity,
   };
+};
+
+type RecordedBrokerIdentity = "verified" | "mismatch" | "unknown" | "unsupported";
+
+/**
+ * Prove whether a live PID still belongs to the broker recorded in ready.json.
+ * - verified: the live executable matches the recorded path.
+ * - mismatch: the live executable is known and different (PID was recycled).
+ * - unknown: ready metadata is missing/inconsistent or the live path is unavailable.
+ * - unsupported: the driver has no identity probe (legacy liveness-only behaviour).
+ */
+const identifyRecordedBroker = async (
+  paths: DaemonPaths,
+  pid: number,
+  driver: DaemonDriver,
+): Promise<RecordedBrokerIdentity> => {
+  if (driver.executablePath === undefined) return "unsupported";
+  const ready = await readReadyMetadata(paths.readyFile);
+  if (ready === undefined || ready.pid !== pid) return "unknown";
+  const actual = await driver.executablePath(pid);
+  if (actual === undefined) return "unknown";
+  return executablePathsEqual(actual, ready.executablePath) ? "verified" : "mismatch";
 };
 
 const readyMatchesBroker = (

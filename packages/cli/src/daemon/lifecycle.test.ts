@@ -327,18 +327,101 @@ describe("daemon lifecycle", () => {
     expect(inspected).toEqual({ status: "not-running", paths, stalePid: 12345 });
     expect(driver.spawned).toEqual([]);
   });
+
+  it("reuses a broker only when its live executable matches ready.json", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createFakeDriver(0, true, "/fake/opentray");
+
+    const first = await startDaemon({ paths, driver });
+    const second = await startDaemon({ paths, driver });
+
+    expect(second.status).toBe("already-running");
+    expect(second.pid).toBe(first.pid);
+    expect(driver.stopped).toEqual([]);
+  });
+
+  it("does not reuse or signal a recycled PID whose live executable differs", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    let recycledPid = 0;
+    const driver = createFakeDriver(0, true, (pid) =>
+      pid === recycledPid ? "/usr/bin/svchost" : "/fake/opentray",
+    );
+
+    const first = await startDaemon({ paths, driver });
+    recycledPid = first.pid;
+    const replacement = await startDaemon({ paths, driver });
+
+    expect(replacement.status).toBe("started");
+    expect(replacement.pid).not.toBe(first.pid);
+    expect(driver.stopped).toEqual([]);
+    expect(await driver.isAlive(first.pid)).toBe(true);
+  });
+
+  it("stops an incompatible broker only when its live executable matches ready.json", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    const driver = createFakeDriver(0, true, "/fake/opentray");
+    const first = await startDaemon({ paths, driver });
+    await writeReadyFile(paths, first.pid, brokerIdentity("old"));
+
+    const replacement = await startDaemon({ paths, driver });
+
+    expect(driver.stopped).toEqual([first.pid]);
+    expect(replacement.pid).not.toBe(first.pid);
+  });
+
+  it("does not signal a recycled PID from stopDaemon", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    let recycledPid = 0;
+    const driver = createFakeDriver(0, true, (pid) =>
+      pid === recycledPid ? "/usr/bin/svchost" : "/fake/opentray",
+    );
+    const first = await startDaemon({ paths, driver });
+    recycledPid = first.pid;
+
+    const stopped = await stopDaemon({ paths, driver });
+
+    expect(stopped).toEqual({ status: "not-running", paths, stalePid: first.pid });
+    expect(driver.stopped).toEqual([]);
+    expect(await driver.isAlive(first.pid)).toBe(true);
+    await expect(readFile(paths.pidFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("inspects a recycled PID as not running", async () => {
+    const homeDir = await makeTempHome();
+    const paths = resolveDaemonPaths({ homeDir, packageVersion: "0.1.0" });
+    let recycledPid = 0;
+    const driver = createFakeDriver(0, true, (pid) =>
+      pid === recycledPid ? "/usr/bin/svchost" : "/fake/opentray",
+    );
+    const first = await startDaemon({ paths, driver });
+    recycledPid = first.pid;
+
+    const inspected = await inspectDaemon({ paths, driver });
+
+    expect(inspected).toEqual({ status: "not-running", paths, stalePid: first.pid });
+  });
 });
 
 const createFakeDriver = (
   spawnDelayMs = 0,
   stopSucceeds = true,
-): DaemonDriver & { readonly spawned: number[] } => {
+  liveExecutablePath?: string | ((pid: number) => string | undefined),
+): DaemonDriver & { readonly spawned: number[]; readonly stopped: number[] } => {
   const alive = new Set<number>();
   const spawned: number[] = [];
+  const stopped: number[] = [];
   let nextPid = 10_000;
 
-  return {
+  const driver: DaemonDriver & {
+    readonly spawned: number[];
+    readonly stopped: number[];
+  } = {
     spawned,
+    stopped,
     async resolveBroker(paths) {
       return resolvedBroker(paths);
     },
@@ -357,11 +440,17 @@ const createFakeDriver = (
       return pid;
     },
     async stop(pid) {
+      stopped.push(pid);
       if (stopSucceeds) {
         alive.delete(pid);
       }
     },
   };
+  if (liveExecutablePath !== undefined) {
+    driver.executablePath = async (pid) =>
+      typeof liveExecutablePath === "function" ? liveExecutablePath(pid) : liveExecutablePath;
+  }
+  return driver;
 };
 
 const brokerIdentity = (seed: string, packageVersion = "0.1.0"): BrokerArtifactIdentity => {
