@@ -1,5 +1,11 @@
 # @opentray/ext-webview
 
+## 0.36.2
+
+### Patch Changes
+
+- a779175: Add a source-gated page clipboard API backed by the WebView client's system clipboard.
+
 ## 0.36.1
 
 ## 0.36.0
