@@ -1,7 +1,7 @@
 <!--
 Orthogonal intents (maintained 2026-09-18; established by the add-ext-clipboard change):
 1. Route package consumers to OS clipboard text atoms (read/write/clear) for host-side
-   callers without a visible page.
+   callers without a visible page; WebView pages use the page-side WebView clipboard API.
 2. Preserve platform truth: the frozen UTF-16 1 MiB write cap, the lone-surrogate
    rejection (never a silent replacement), the win32 locked-clipboard bounded retry,
    and Linux typed unsupported.
@@ -14,8 +14,8 @@ Orthogonal intents (maintained 2026-09-18; established by the add-ext-clipboard 
 
 Use this reference when the user asks how to read or write the system clipboard text
 from a tray menu action, a background CLI, or any host-side moment without a visible
-page. Text a page can handle itself (`navigator.clipboard`) stays the page's job; there
-is no page bridge by design. v1 is UTF-8 text only — no images, no file lists, no
+page. WebView pages should use the source-gated `navigator.opentray.clipboard` bridge
+documented in `ext-webview`; this facade runs on the SDK host machine. v1 is UTF-8 text only — no images, no file lists, no
 change listeners.
 
 ## Install

@@ -871,6 +871,7 @@ fn navigator_window_runtime_can_allow_remote_window_without_globals() {
                     "https://example.com".to_string(),
                 )]),
                 tray: None,
+                clipboard: None,
                 window_globals: Some(vec![WebviewNativeApiSource::None]),
                 screen: None,
                 screen_globals: None,

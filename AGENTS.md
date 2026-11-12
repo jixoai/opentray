@@ -684,6 +684,11 @@ applies unchanged and is not repeated here.
 
 ### Clipboard (essentials)
 
+- WebView pages use `navigator.opentray.clipboard` from the client-side WebView bridge, gated by
+  `nativeApiPolicy.clipboard` (falling back to the local-only `defaultSrc`). The bridge delegates
+  to that client's browser Clipboard API and must not route clipboard data through Core/broker;
+  browser permissions and transient user activation remain authoritative. Host-side Node callers
+  use the separate `@opentray/ext-clipboard` extension.
 - The UTF-16 contract is frozen on `String.length` semantics: the write cap is
   1,048,576 UTF-16 code units (1 MiB) enforced in facade preflight; a lone surrogate
   rejects typed (`reason:"lone-surrogate"`, `index`) — replacement writes are forbidden

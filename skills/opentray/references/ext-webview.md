@@ -82,6 +82,26 @@ Supported host commands:
 - `setBackground`
 - `setMinimumSize` / `setMaximumSize`
 
+### Page Clipboard
+
+Local pages receive `navigator.opentray.clipboard` by default. It delegates to the system
+clipboard implementation owned by the WebView client (`navigator.clipboard`) rather than
+routing clipboard data through the broker. This keeps access on the machine that owns the
+visible WebView when the app runs remotely. Use it from a user gesture:
+
+```ts
+await navigator.opentray.clipboard.writeText("auth-code");
+const text = await navigator.opentray.clipboard.readText();
+```
+
+The bridge exposes only `readText()` and `writeText(text)` and does not bypass browser
+security. Reads can require browser permission and writes generally require transient user
+activation. Browser rejections, including `NotAllowedError`, are propagated. Set
+`nativeApiPolicy.clipboard` to the normal source tokens to opt selected remote origins in;
+without an override it follows `defaultSrc` (local-only by default). The independent
+`browserPermissionPolicy.clipboardRead` remains the browser-level read permission policy.
+Host-side Node callers should use `@opentray/ext-clipboard`.
+
 Page-side `navigator.opentrayWindow.show()` and `hide()` are reversible visibility controls for an existing window session. They are not content replacement verbs; use `setContent`, `navigate`, or `destroy` when that is the actual product intent.
 
 Host-side `createWebviewWindow(options)` is the bootstrap declaration for one tray-scoped session. Call it once, keep that `WebviewWindowHandle`, and call `show()` / `hide()` for repeated tray activations. After the first successful show, `show()` must restore visibility without replaying startup width, height, style, content, or native API flags. Use `resizeTo`, `moveTo`, `setStyle`, `setBackground`, `setMinimumSize`, `setMaximumSize`, `setContent`, or `navigate` when a real mutation is intended.

@@ -1,6 +1,6 @@
 # @opentray/ext-clipboard
 
-Official OpenTray clipboard extension: system clipboard text atoms — read, write, and clear — for host-side callers (tray menu actions, background CLIs, moments without a visible page). Text a page can handle itself (`navigator.clipboard`) stays the page's job; there is no page bridge. v1 is UTF-8 text only.
+Official OpenTray clipboard extension: system clipboard text atoms — read, write, and clear — for host-side callers (tray menu actions and background CLIs). WebView pages use the source-gated `navigator.opentray.clipboard` browser bridge documented by `@opentray/ext-webview`, keeping access on the machine hosting the visible WebView. v1 is UTF-8 text only.
 
 ## Role
 

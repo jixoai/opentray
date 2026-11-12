@@ -297,6 +297,7 @@ const webview = tray.createWebviewWindow({
     window: ["https://example.com"],
     screen: ["https://example.com"],
     tray: ["https://example.com"],
+    clipboard: ["'local'", "https://example.com"],
     titleSync: ["https://example.com"],
     iconSync: ["https://example.com"],
   },
@@ -318,7 +319,9 @@ Window session law:
 
 This is intentional. `show(...)` is the visibility/bootstrap verb, not the implicit reload or reset verb. Tray click handlers should create one handle and call `show()` on that handle repeatedly; do not create a new window, reapply startup style, or resend startup size on every tray activation.
 
-Without `nativeApiPolicy`, page-exposed native capability is local-only by default. Remote URLs do not receive `navigator.window`, `navigator.screen`, global bindings, or page-native sync unless their source is explicitly allowed.
+Without `nativeApiPolicy`, page-exposed native capability is local-only by default. Remote URLs do not receive `navigator.window`, `navigator.screen`, `navigator.opentray.clipboard`, global bindings, or page-native sync unless their source is explicitly allowed.
+
+The page clipboard bridge is a source-gated wrapper over the WebView client's browser Clipboard API. It does not send clipboard contents through the broker, so the visible WebView client remains the system clipboard owner. Call `navigator.opentray.clipboard.writeText(text)` from a user gesture; `readText()` follows browser clipboard-read permission behavior. Browser rejections, including `NotAllowedError`, are propagated. This bridge does not bypass WebView security or replace host-side `@opentray/ext-clipboard`.
 
 Browser/device permissions use a separate policy surface. Do not overload `nativeApiPolicy` for camera, microphone, geolocation, notifications, clipboard read, autoplay, local fonts, sensors, MIDI system exclusive, file read/write, multiple downloads, or window management:
 

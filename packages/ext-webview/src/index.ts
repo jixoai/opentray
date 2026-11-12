@@ -79,10 +79,16 @@ export interface WebviewNativeApiPolicy {
   window?: WebviewNativeApiSource[];
   screen?: WebviewNativeApiSource[];
   tray?: WebviewNativeApiSource[];
+  clipboard?: WebviewNativeApiSource[];
   windowGlobals?: WebviewNativeApiSource[];
   screenGlobals?: WebviewNativeApiSource[];
   titleSync?: WebviewNativeApiSource[];
   iconSync?: WebviewNativeApiSource[];
+}
+
+export interface WebviewPageClipboard {
+  readText(): Promise<string>;
+  writeText(text: string): Promise<void>;
 }
 
 export interface WebviewDownloadOptions {
@@ -649,6 +655,7 @@ export interface WebviewNavigatorNamespace {
   readonly window?: WebviewNavigatorWindow;
   readonly screen?: WebviewNavigatorScreen;
   readonly tray?: WebviewNavigatorTray;
+  readonly clipboard?: WebviewPageClipboard;
   readonly ipc?: WebviewNavigatorIpc;
   readonly permissions?: WebviewNavigatorPermissions;
   execCommand(command: WebviewExecCommand): void;

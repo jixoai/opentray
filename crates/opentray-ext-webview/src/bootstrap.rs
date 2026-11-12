@@ -169,6 +169,7 @@ pub(crate) fn navigator_window_bootstrap_script(
   const WINDOW_API_KEY = "__OPENTRAY_WINDOW_API__";
   const SCREEN_API_KEY = "__OPENTRAY_SCREEN_API__";
   const TRAY_API_KEY = "__OPENTRAY_TRAY_API__";
+  const CLIPBOARD_API_KEY = "__OPENTRAY_CLIPBOARD_API__";
   const PERMISSIONS_API_KEY = "__OPENTRAY_PERMISSIONS_API__";
   const isLoopbackHost = (host) =>
     host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
@@ -221,6 +222,7 @@ pub(crate) fn navigator_window_bootstrap_script(
   const bindScreenGlobals =
     requestedBindScreenGlobals && screenEnabled && directiveAllows("screenGlobals");
   const trayEnabled = requestedTrayEnabled && directiveAllows("tray");
+  const clipboardEnabled = directiveAllows("clipboard");
   const titleSyncPageToNative =
     requestedTitleSyncPageToNative && directiveAllows("titleSync");
   const titleSyncNativeToPage =
@@ -858,6 +860,43 @@ pub(crate) fn navigator_window_bootstrap_script(
       });
       return api;
     };
+    const createClipboardApi = () => {
+      if (window[CLIPBOARD_API_KEY]) return window[CLIPBOARD_API_KEY];
+      const getClipboard = () => {
+        const clipboard = navigator.clipboard;
+        if (!clipboard) {
+          const error = new Error("System clipboard is unavailable in this WebView context");
+          error.name = "NotSupportedError";
+          throw error;
+        }
+        return clipboard;
+      };
+      const api = {
+        readText() {
+          try {
+            return Promise.resolve(getClipboard().readText());
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        },
+        writeText(text) {
+          if (typeof text !== "string") {
+            return Promise.reject(new TypeError("text must be a string"));
+          }
+          try {
+            return Promise.resolve(getClipboard().writeText(text));
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        }
+      };
+      Object.freeze(api);
+      Object.defineProperty(window, CLIPBOARD_API_KEY, {
+        value: api,
+        configurable: true
+      });
+      return api;
+    };
     const createIpcApi = () => {
       const api = {
         postMessage(payload) {
@@ -1219,6 +1258,14 @@ pub(crate) fn navigator_window_bootstrap_script(
           configurable: true
         });
       }
+      if (config && config.clipboardEnabled) {
+        const clipboardApi = createClipboardApi();
+        opentrayApi ??= {};
+        defineBridgeProperty(opentrayApi, "clipboard", {
+          value: clipboardApi,
+          configurable: true
+        });
+      }
       opentrayApi ??= {};
       defineBridgeProperty(opentrayApi, "ipc", {
         value: createIpcApi(),
@@ -1323,6 +1370,7 @@ pub(crate) fn navigator_window_bootstrap_script(
     windowEnabled ||
     screenEnabled ||
     trayEnabled ||
+    clipboardEnabled ||
     permissionManagerEnabled ||
     titleSyncPageToNative ||
     titleSyncNativeToPage ||
@@ -1338,6 +1386,7 @@ pub(crate) fn navigator_window_bootstrap_script(
       screenEnabled,
       bindScreenGlobals,
       trayEnabled,
+      clipboardEnabled,
       permissionManagerEnabled,
       messageChannelsEnabled: requestedMessageChannelsEnabled,
       webviewIdEnabled: requestedWebviewIdEnabled
@@ -1383,6 +1432,7 @@ fn native_api_policy_json(policy: &WebviewNativeApiPolicy) -> String {
         "window": policy.window.as_ref().map(|rules| native_api_sources_json(rules)),
         "screen": policy.screen.as_ref().map(|rules| native_api_sources_json(rules)),
         "tray": policy.tray.as_ref().map(|rules| native_api_sources_json(rules)),
+        "clipboard": policy.clipboard.as_ref().map(|rules| native_api_sources_json(rules)),
         "windowGlobals": policy.window_globals.as_ref().map(|rules| native_api_sources_json(rules)),
         "screenGlobals": policy.screen_globals.as_ref().map(|rules| native_api_sources_json(rules)),
         "titleSync": policy.title_sync.as_ref().map(|rules| native_api_sources_json(rules)),
@@ -1978,6 +2028,76 @@ return {
             "default",
             false,
         )
+    }
+
+    #[test]
+    fn clipboard_api_uses_browser_clipboard_and_rejects_invalid_writes() {
+        let runtime = run_node_probe(
+            &window_region_bootstrap_script(false),
+            r#"
+let written = null;
+navigator.clipboard = {
+          async readText() { return "system text"; },
+  async writeText(text) {
+    if (text === "denied") {
+      const error = new Error("permission denied");
+      error.name = "NotAllowedError";
+      throw error;
+    }
+    written = text;
+  }
+};
+const api = navigator.opentray.clipboard;
+const read = await api.readText();
+await api.writeText("code-1234");
+let invalidWrite;
+try { await api.writeText(42); } catch (error) { invalidWrite = error.name; }
+let permissionError;
+try { await api.writeText("denied"); } catch (error) { permissionError = error.name; }
+return {
+  read,
+  written,
+  invalidWrite,
+  permissionError,
+  frozen: Object.isFrozen(api),
+  exposedOnNavigator: navigator.clipboard !== api
+};
+"#,
+        );
+
+        assert_eq!(runtime["read"], Value::from("system text"));
+        assert_eq!(runtime["written"], Value::from("code-1234"));
+        assert_eq!(runtime["invalidWrite"], Value::from("TypeError"));
+        assert_eq!(runtime["permissionError"], Value::from("NotAllowedError"));
+        assert_eq!(runtime["frozen"], Value::Bool(true));
+        assert_eq!(runtime["exposedOnNavigator"], Value::Bool(true));
+    }
+
+    #[test]
+    fn clipboard_api_is_absent_for_disallowed_page_sources() {
+        let script = navigator_window_bootstrap_script(
+            NavigatorWindowSettings::default(),
+            false,
+            false,
+            NavigatorScreenSettings::default(),
+            NavigatorTraySettings::default(),
+            MetadataSyncSettings::default(),
+            MetadataSyncSettings::default(),
+            &WebviewNativeApiPolicy {
+                default_src: vec![WebviewNativeApiSource::None],
+                ..WebviewNativeApiPolicy::default()
+            },
+            &Default::default(),
+            false,
+            false,
+            "default",
+            false,
+        );
+        let runtime = run_node_probe(
+            &script,
+            r#"return { hasClipboard: Boolean(navigator.opentray?.clipboard) };"#,
+        );
+        assert_eq!(runtime["hasClipboard"], Value::Bool(false));
     }
 
     fn overlay_bootstrap_script() -> String {

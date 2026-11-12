@@ -48,6 +48,7 @@ import type {
   WebviewWindowDevtools,
   WebviewNavigatorIpc,
   WebviewNavigatorNamespace,
+  WebviewPageClipboard,
   WebviewNavigatorPermissions,
   WebviewNavigatorScreen,
   WebviewNavigatorWindow,
@@ -454,6 +455,7 @@ describe("@opentray/ext-webview", () => {
         window: ["https://example.com"],
         screen: ["'local'"],
         tray: ["'local'"],
+        clipboard: ["'local'", "https://example.com"],
         windowGlobals: ["'none'"],
         titleSync: ["https://example.com"],
         iconSync: ["'local'"],
@@ -516,6 +518,7 @@ describe("@opentray/ext-webview", () => {
             window: ["https://example.com"],
             screen: ["'local'"],
             tray: ["'local'"],
+            clipboard: ["'local'", "https://example.com"],
             windowGlobals: ["'none'"],
             titleSync: ["https://example.com"],
             iconSync: ["'local'"],
@@ -535,6 +538,7 @@ describe("@opentray/ext-webview", () => {
       nativeApiPolicy: {
         defaultSrc: ["'local'"],
         window: ["https://example.com"],
+        clipboard: ["'local'", "https://example.com"],
       },
       browserPermissionPolicy: {
         camera: {
@@ -559,6 +563,7 @@ describe("@opentray/ext-webview", () => {
         nativeApiPolicy: {
           defaultSrc: ["'local'"],
           window: ["https://example.com"],
+          clipboard: ["'local'", "https://example.com"],
         },
         browserPermissionPolicy: {
           camera: {
@@ -2307,6 +2312,9 @@ describe("@opentray/ext-webview", () => {
     >();
     expectTypeOf<Navigator["opentrayScreen"]>().toMatchTypeOf<
       WebviewNavigatorScreen | undefined
+    >();
+    expectTypeOf<WebviewNavigatorNamespace["clipboard"]>().toMatchTypeOf<
+      WebviewPageClipboard | undefined
     >();
     expectTypeOf<Navigator["opentray"]>().toMatchTypeOf<
       WebviewNavigatorNamespace | undefined
